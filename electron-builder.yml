@@ -1,0 +1,45 @@
+appId: app.dsh.desktop
+productName: DshDesktop
+publish:
+  provider: github
+  owner: Denszh
+  repo: dsh-desktop
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - src/**/*
+  - package.json
+
+extraResources:
+  - from: resources/app-icon.png
+    to: dsh-desktop-resources/app-icon.png
+  - from: resources/tray-icon.png
+    to: dsh-desktop-resources/tray-icon.png
+  - from: resources/tray-icon@2x.png
+    to: dsh-desktop-resources/tray-icon@2x.png
+
+mac:
+  category: public.app-category.developer-tools
+  icon: resources/icon.icns
+  target:
+    - dmg
+    - zip
+  artifactName: DshDesktop-${version}-${arch}.${ext}
+
+dmg:
+  artifactName: DshDesktop-${version}-${arch}.dmg
+
+win:
+  icon: resources/win-icon.png
+  target:
+    - nsis
+  artifactName: DshDesktop-${version}-${arch}.${ext}
+
+linux:
+  category: Development
+  icon: resources/app-icon.png
+  target:
+    - AppImage
+  artifactName: DshDesktop-${version}-${arch}.${ext}

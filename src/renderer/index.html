@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <title>DeepSeek Harness</title>
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, "PingFang SC", sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+    }
+    h1 { font-size: 18px; margin-bottom: 8px; }
+    p { font-size: 13px; color: #8a8aa0; }
+    .spin {
+      width: 28px; height: 28px; margin-bottom: 16px;
+      border: 3px solid #333; border-top-color: #4fc3f7;
+      border-radius: 50%; animation: rot 0.9s linear infinite;
+    }
+    @keyframes rot { to { transform: rotate(360deg); } }
+    .error { color: #ff6b6b; }
+  </style>
+</head>
+<body>
+  <div class="spin"></div>
+  <h1>正在启动 DeepSeek Harness…</h1>
+  <p>dsh web 服务启动中，窗口会自动打开</p>
+</body>
+</html>
