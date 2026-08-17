@@ -1,6 +1,6 @@
 # dsh-desktop
 
-DeepSeek Harness 桌面壳 —— 用 Electron 包装 dsh web，提供托盘管理和进程守护。
+DeepSeek Harness 桌面壳 —— 用 Electron 包装 dsh web，提供托盘管理、进程守护和自动更新。
 
 ## 功能
 
@@ -9,6 +9,23 @@ DeepSeek Harness 桌面壳 —— 用 Electron 包装 dsh web，提供托盘管�
 - **端口自动发现**：解析 dsh stdout 的 `dsh web: http://127.0.0.1:<port>` 行
 - **孤儿清理**：Electron 被强杀（崩溃/SIGKILL）后，下次启动自动回收残留的 dsh 进程
 - **正式图标**：用 dsh 官方 favicon（鲸鱼 logo）生成 Dock app 图标 + 托盘 Template 图标
+
+## 自动更新三套机制
+
+### ① fork 同步（远程分发）
+每 60s `git fetch origin`（`origin` = 你的 fork `Denszh/deepseek-harness`），检测到 fork 有新提交 → `git pull --ff-only` → 自动重启 dsh。
+**场景**：你本地改 dsh 源码/插件 → push 到 fork → dsh-desktop 最多 1 分钟后自动拉到并重启，新插件立即生效。
+
+### ③ 本地监听（开发即时反馈）
+`fs.watch` 监听 DSH_REPO 的 `packages/`、`examples/`、`hello-plugin/` 等目录，源码变化（2s 防抖）→ 自动重启 dsh。
+**场景**：本地开发插件时，保存即生效，无需手动重启。
+
+### ② app 自更新（electron-updater）
+打包版本通过 electron-updater 检查 GitHub Releases（`Denszh/dsh-desktop`）。需用 `electron-builder --publish always` 发布带 `latest-mac.yml` 的 Release 后才生效。
+
+**git remote 约定**（`~/personal/deepseek-harness`）：
+- `origin` = 你的 fork `Denszh/deepseek-harness`（同步来源）
+- `upstream` = 官方 `deepseek-ai/deepseek-harness`
 
 ## 使用
 
@@ -46,21 +63,17 @@ test-dsh-process.js   独立测试：验证 spawn/kill/孤儿清理（无 GUI）
 
 ## 打包决策
 
-**当前不需要打包**，开发模式 `pnpm start` 即可。原因：
+**开发模式 `pnpm start` 即可**；打包成 `.app` 用于启动台安装（已发布到 GitHub，支持自动更新检查）。
 
 | 维度 | 说明 |
 |------|------|
-| 壳无独立价值 | 打包产物只是空 Electron 壳，运行时仍依赖 `DSH_REPO` 指向的 dsh 源码（tsx 运行），装上还得配环境变量 |
-| dsh 不可分发 | dsh 是源码 + 仓库级 node_modules，`pnpm dsh` 无法随 app 分发 |
-| 场景定位 | 解决"看不到实例/端口"的管理痛点，非分发给外部用户 |
-
-**未来需要打包时的前置条件**：
-1. 改用官方 npm 包 `@deepseek-ai/dsh`（`npx dsh web`）替代源码 spawn，dsh 才能随安装包独立运行
-2. 再启用 electron-builder 4 平台矩阵 + 签名 + 自动更新（参考 mkagent 的 release 流水线）
-3. `electron-builder.yml` 已配置好（含正式 icon），届时直接可用
+| 壳仍依赖源码 | 运行时靠 `DSH_REPO` 指向的 dsh 源码（tsx 运行） |
+| fork 同步解决分发 | dsh 源码更新走 ①（fork git pull），dsh-desktop 壳不变即可应用新插件 |
+| app 自更新可选 | ② electron-updater 需 GitHub Release 才生效，属于增量增强 |
 
 ## 已知限制
 
 - macOS Electron 主进程吞掉 SIGTERM/SIGINT，JS handler 不触发（Electron 平台行为），孤儿清理依赖下次启动
 - 依赖 `DSH_REPO` 指向的源码已 `pnpm install` 且构建过
 - `sharp` 仅用于一次性生成图标（`scripts/gen-icons.js`），非运行时依赖
+- fork 同步（①）只在工作区干净时 `--ff-only` 生效；本地有未提交改动会 pull 失败（托盘菜单显示错误，改完即可）
