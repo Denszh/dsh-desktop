@@ -1,6 +1,6 @@
 # dsh-desktop
 
-DeepSeek Harness 桌面壳 —— 用 Electron 包装 dsh web，提供托盘管理、进程守护和自动更新。
+DeepSeek Harness 桌面壳 —— 用 Electron 包装 dsh web，提供托盘管理和 App 自动更新。
 
 ## 功能
 
@@ -9,23 +9,25 @@ DeepSeek Harness 桌面壳 —— 用 Electron 包装 dsh web，提供托盘管�
 - **端口自动发现**：解析 dsh stdout 的 `dsh web: http://127.0.0.1:<port>` 行
 - **孤儿清理**：Electron 被强杀（崩溃/SIGKILL）后，下次启动自动回收残留的 dsh 进程
 - **正式图标**：用 dsh 官方 favicon（鲸鱼 logo）生成 Dock app 图标 + 托盘 Template 图标
+- **App 自动更新**：electron-updater 检查 GitHub Releases，发布新版后已安装用户自动升级
 
-## 自动更新三套机制
+## App 自动更新（electron-updater）
 
-### ① fork 同步（远程分发）
-每 60s `git fetch origin`（`origin` = 你的 fork `Denszh/deepseek-harness`），检测到 fork 有新提交 → `git pull --ff-only` → 自动重启 dsh。
-**场景**：你本地改 dsh 源码/插件 → push 到 fork → dsh-desktop 最多 1 分钟后自动拉到并重启，新插件立即生效。
+**工作流**：
+```
+用户：从 GitHub Releases 下载 DshDesktop-<ver>.dmg → 安装到 /Applications
+作者：打包新版 → 发布到 GitHub Releases（dmg + zip + latest-mac.yml）
+用户 app：每 6h 检查 Releases 的 latest-mac.yml → 发现新版 → 下载 zip → 退出时替换 → 重启即新版
+```
 
-### ③ 本地监听（开发即时反馈）
-`fs.watch` 监听 DSH_REPO 的 `packages/`、`examples/`、`hello-plugin/` 等目录，源码变化（2s 防抖）→ 自动重启 dsh。
-**场景**：本地开发插件时，保存即生效，无需手动重启。
+**macOS 硬性前提：必须 Developer ID 代码签名**。未签名/ad-hoc 签名的 app 无法自动更新（Apple 平台限制）。Windows/Linux 无此限制。
 
-### ② app 自更新（electron-updater）
-打包版本通过 electron-updater 检查 GitHub Releases（`Denszh/dsh-desktop`）。需用 `electron-builder --publish always` 发布带 `latest-mac.yml` 的 Release 后才生效。
-
-**git remote 约定**（`~/personal/deepseek-harness`）：
-- `origin` = 你的 fork `Denszh/deepseek-harness`（同步来源）
-- `upstream` = 官方 `deepseek-ai/deepseek-harness`
+**发布命令**：
+```bash
+# 需要 Apple Developer ID 证书 + GH_TOKEN 已配置
+pnpm dist:mac --publish always
+```
+或手动：打包后把 `DshDesktop-<ver>.dmg`、`DshDesktop-<ver>.zip`、`latest-mac.yml` 上传到 GitHub Releases 并标记为最新。
 
 ## 使用
 
@@ -60,20 +62,15 @@ test-dsh-process.js   独立测试：验证 spawn/kill/孤儿清理（无 GUI）
   - 强杀 Electron（macOS 吞 SIGTERM）→ state 文件记录 groupPid，下次启动自动清理
 - **state 文件**：`~/Library/Application Support/dsh-desktop/dsh-state.json`
 - **图标**：`resources/` 下 app-icon.png（深蓝圆角 + 白色 logo）、tray-icon.png（白色透明）、icon.icns；打包后经 `extraResources` 分发，运行时用 `process.resourcesPath` 优先定位
+- **自更新**：`src/main/updater.js` 封装 electron-updater，托盘菜单可手动"检查 App 更新"，启动后 30s + 每 6h 自动检查
 
 ## 打包决策
 
-**开发模式 `pnpm start` 即可**；打包成 `.app` 用于启动台安装（已发布到 GitHub，支持自动更新检查）。
-
-| 维度 | 说明 |
-|------|------|
-| 壳仍依赖源码 | 运行时靠 `DSH_REPO` 指向的 dsh 源码（tsx 运行） |
-| fork 同步解决分发 | dsh 源码更新走 ①（fork git pull），dsh-desktop 壳不变即可应用新插件 |
-| app 自更新可选 | ② electron-updater 需 GitHub Release 才生效，属于增量增强 |
+**开发模式 `pnpm start` 即可**；打包成 `.app` 用于启动台安装/分发给用户。app 自动更新依赖 GitHub Releases + Developer ID 签名（macOS）。
 
 ## 已知限制
 
 - macOS Electron 主进程吞掉 SIGTERM/SIGINT，JS handler 不触发（Electron 平台行为），孤儿清理依赖下次启动
-- 依赖 `DSH_REPO` 指向的源码已 `pnpm install` 且构建过
+- **macOS 自动更新必须有 Developer ID 签名**；未签名 app 的 electron-updater 会跳过更新
+- 依赖 `DSH_REPO` 指向的源码已 `pnpm install` 且构建过（`~/personal/deepseek-harness`）
 - `sharp` 仅用于一次性生成图标（`scripts/gen-icons.js`），非运行时依赖
-- fork 同步（①）只在工作区干净时 `--ff-only` 生效；本地有未提交改动会 pull 失败（托盘菜单显示错误，改完即可）
