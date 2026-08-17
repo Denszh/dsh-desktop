@@ -7,11 +7,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const {
-  checkForkUpdate,
-  pullFork,
-  watchRepo,
   setupAppUpdater,
-  POLL_INTERVAL_MS,
 } = require('./updater.js');
 
 // ---------------------------------------------------------------------------
@@ -291,7 +287,7 @@ function buildTrayMenu() {
       enabled: false,
     },
     {
-      label: `更新: ${lastUpdateStatus}`,
+      label: `App 更新: ${lastUpdateStatus}`,
       enabled: false,
     },
     { type: 'separator' },
@@ -308,15 +304,16 @@ function buildTrayMenu() {
           click: () => startDsh(),
         },
     {
-      label: '立即检查 fork 更新',
+      label: '检查 App 更新',
       click: () => {
-        setUpdateStatus('checking', 'checking fork remote…');
-        checkForkUpdate(DSH_REPO, 'origin', 'master').then((res) => {
-          setUpdateStatus('sync', res.changed ? `更新可用: ${res.detail}` : `已是最新: ${res.detail}`);
-          if (res.changed) {
-            void restartDsh('manual fork update');
-          }
-        });
+        if (appUpdater) {
+          setUpdateStatus('checking', 'checking…');
+          appUpdater.checkForUpdates().catch((e) => {
+            setUpdateStatus('error', `check failed: ${e.message}`);
+          });
+        } else {
+          setUpdateStatus('no-updater', 'dev mode: disabled');
+        }
       },
     },
     { type: 'separator' },
@@ -390,10 +387,11 @@ function startDsh() {
 }
 
 // ---------------------------------------------------------------------------
-// Update integration — fork sync (①), local watch (③), app self-update (②)
+// App self-update — electron-updater against GitHub Releases.
 // ---------------------------------------------------------------------------
 
 let lastUpdateStatus = 'idle';
+let appUpdater = null; // set once packaged; used by the tray "检查 App 更新" item
 
 function setUpdateStatus(kind, message) {
   lastUpdateStatus = `${kind}: ${message}`;
@@ -404,51 +402,6 @@ function setUpdateStatus(kind, message) {
   updateTray();
 }
 
-// Gracefully restart the dsh child: stop it, wait for exit, start fresh.
-async function restartDsh(reason) {
-  if (!dsh.isRunning()) {
-    startDsh();
-    return;
-  }
-  setUpdateStatus('restarting', `${reason}`);
-  dsh.removeAllListeners('exit');
-  dsh.stop();
-  await dsh.waitForExit();
-  startDsh();
-}
-
-// ① Fork sync loop: poll the fork remote; pull + restart when ahead.
-function startForkSync() {
-  const tick = async () => {
-    if (isQuitting) return;
-    try {
-      const res = await checkForkUpdate(DSH_REPO, 'origin', 'master');
-      if (res.changed) {
-        setUpdateStatus('sync', `fork ahead (${res.detail}) — pulling`);
-        const pull = await pullFork(DSH_REPO, 'origin', 'master');
-        setUpdateStatus('sync', pull.ok ? `pulled: ${pull.detail}` : `pull failed: ${pull.detail}`);
-        if (pull.ok) {
-          await restartDsh('dsh source updated from fork');
-        }
-      }
-    } catch (err) {
-      setUpdateStatus('sync', `error: ${err.message}`);
-    }
-  };
-  const interval = setInterval(tick, POLL_INTERVAL_MS);
-  // Run the first check shortly after boot.
-  const first = setTimeout(tick, 8 * 1000);
-  return () => { clearInterval(interval); clearTimeout(first); };
-}
-
-// ③ Local watch: instant dev feedback — source change restarts dsh.
-function startLocalWatch() {
-  return watchRepo(DSH_REPO, () => {
-    setUpdateStatus('watch', 'source changed — restarting dsh');
-    void restartDsh('local source change');
-  });
-}
-
 // ② App self-update via electron-updater (packaged builds only).
 function startAppUpdater() {
   let autoUpdater = null;
@@ -457,6 +410,7 @@ function startAppUpdater() {
   } catch {
     autoUpdater = null;
   }
+  appUpdater = autoUpdater;
   return setupAppUpdater({
     app,
     autoUpdater,
@@ -491,14 +445,10 @@ if (!gotLock) {
     createTray();
     startDsh();
 
-    // Start the three update mechanisms.
-    const stopForkSync = startForkSync();     // ① fork remote sync
-    const stopLocalWatch = startLocalWatch(); // ③ local source watch
-    const stopAppUpdater = startAppUpdater(); // ② app self-update
+    // ② App self-update via electron-updater.
+    const stopAppUpdater = startAppUpdater();
 
     app.on('will-quit', () => {
-      stopForkSync();
-      stopLocalWatch();
       stopAppUpdater();
     });
 
