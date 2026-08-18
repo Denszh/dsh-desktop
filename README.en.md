@@ -120,16 +120,6 @@ scripts/release.sh            one-shot release script
 - **Auto-update**: packaged builds check for updates 30s after launch and every 6h afterwards
 - **CI caching**: GitHub Actions caches dsh-runtime builds (`~/.npm` + `.dsh-runtime-cache`), greatly reducing Windows build time
 
-## Known Limitations
-
-- macOS auto-update requires a Developer ID signature; unsigned builds need manual downloads
-- macOS Electron main swallows SIGTERM/SIGINT; orphan cleanup relies on the next launch
-- First run requires network to download the runtimes (Node + dsh, ~a few hundred MB)
-
-## Changelog
-
-All changes are recorded in [CHANGELOG.md](CHANGELOG.md).
-
 ## License
 
 [MIT](LICENSE)

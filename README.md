@@ -120,16 +120,6 @@ scripts/release.sh            一键发布脚本
 - **自更新机制**：打包版启动 30 秒后及此后每 6 小时自动检查更新
 - **CI 缓存**：GitHub Actions 缓存 dsh-runtime 构建结果（`~/.npm` + `.dsh-runtime-cache`），大幅缩短 Windows 构建时间
 
-## 已知限制
-
-- macOS 自动更新需要 Developer ID 签名；未签名版本不会自动更新，需手动下载新版
-- macOS Electron 主进程吞掉 SIGTERM/SIGINT，孤儿进程依赖下次启动清理
-- 首次运行需联网下载运行时（Node + dsh，约几百 MB）
-
-## 更新日志
-
-所有版本的变更记录见 [CHANGELOG.md](CHANGELOG.md)。
-
 ## License
 
 [MIT](LICENSE)
