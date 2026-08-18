@@ -13,9 +13,9 @@
 
 <p align="center">
   <a href="https://github.com/Denszh/dsh-desktop/releases">
-    <img src="https://img.shields.io/github/v/release/Denszh/dsh-desktop?style=flat-square&label=release&color=4D6BFE" alt="Release" />
+    <img src="https://img.shields.io/github/v/release/Denszh/dsh-desktop?style=flat-square&amp;label=release&amp;color=4D6BFE" alt="Release" />
   </a>
-  <img src="https://img.shields.io/github/license/Denszh/dsh-desktop?style=flat-square&label=license&color=4D6BFE" alt="MIT License" />
+  <img src="https://img.shields.io/github/license/Denszh/dsh-desktop?style=flat-square&amp;label=license&amp;color=4D6BFE" alt="MIT License" />
   <img src="https://img.shields.io/badge/macOS%20%7C%20Windows-black?style=flat-square" alt="macOS | Windows" />
 </p>
 
