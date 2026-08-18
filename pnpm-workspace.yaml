@@ -1,5 +1,10 @@
 packages:
   - '.'
-onlyBuiltDependencies:
-  - electron
-  - electron-winstaller
+allowBuilds:
+  '@deepseek-ai/dsh-subprocess-local': true
+  '@google/genai': true
+  koffi: true
+  node-pty: true
+  protobufjs: true
+  electron: true
+  electron-winstaller: true

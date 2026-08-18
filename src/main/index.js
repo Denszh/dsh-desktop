@@ -14,10 +14,45 @@ const {
 // Configuration
 // ---------------------------------------------------------------------------
 
+// dsh 来源：
+//  - 默认：dsh-desktop 自带的 @deepseek-ai/dsh npm 依赖（可分发）
+//  - 可选：DSH_SOURCE=repo + DSH_REPO 指向本地源码（开发调试）
+const DSH_USE_REPO = process.env.DSH_SOURCE === 'repo';
 const DSH_REPO = process.env.DSH_REPO || path.join(os.homedir(), 'personal', 'deepseek-harness');
 const DSH_PROFILE = process.env.DSH_PROFILE || 'web';
-const DEFAULT_DSH_ARGS = ['dsh', '--profile', DSH_PROFILE, '--port', '0'];
 const STATE_FILE = path.join(app.getPath('userData'), 'dsh-state.json');
+
+// 使用安装的 @deepseek-ai/dsh 包里的 dsh bin（随 dsh-desktop 一起打包分发）
+function dshBinPath() {
+  // Electron 打包后 node_modules 在 app.asar 内（或 unpacked）
+  const candidates = [
+    path.join(__dirname, '..', '..', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+    path.join(app.getAppPath(), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+    path.join(process.resourcesPath || '', 'app.asar', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return null;
+}
+
+function dshCommand() {
+  if (DSH_USE_REPO) {
+    // 本地源码调试：pnpm dsh
+    const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+    return { cmd: pnpm, args: ['dsh', '--profile', DSH_PROFILE, '--port', '0'], cwd: DSH_REPO };
+  }
+  // 分发包：直接 node 运行安装的 dsh bin。
+  // dev 模式用系统 node（process.execPath 是 Electron，不兼容 dsh）；
+  // 打包模式用 Electron 自带的 node（process.execPath）。
+  const bin = dshBinPath();
+  if (bin) {
+    const runner = app.isPackaged ? process.execPath : (process.env.npm_node_execpath || 'node');
+    return { cmd: runner, args: [bin, '--profile', DSH_PROFILE, '--port', '0'], cwd: app.getAppPath() };
+  }
+  // 回退：npx（需联网）
+  return { cmd: process.platform === 'win32' ? 'npx.cmd' : 'npx', args: ['-y', '@deepseek-ai/dsh', '--profile', DSH_PROFILE, '--port', '0'], cwd: app.getAppPath() };
+}
 
 // Icon lookup: prefer the packaged extraResources dir (process.resourcesPath),
 // fall back to the dev-tree resources/ folder.
@@ -94,17 +129,17 @@ class DshProcess extends EventEmitter {
   start() {
     if (this.child) return;
 
-    const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
+    const { cmd, args, cwd } = dshCommand();
     this._exited = false;
     this.url = null;
     this.port = null;
 
-    const child = spawn(pnpm, DEFAULT_DSH_ARGS, {
-      cwd: DSH_REPO,
+    const child = spawn(cmd, args, {
+      cwd,
       env: { ...process.env },
       stdio: ['ignore', 'pipe', 'pipe'],
       // Own process group so stop() can terminate the whole tree
-      // (pnpm → node → dsh) instead of only the pnpm parent.
+      // (node → dsh) instead of only the parent.
       detached: process.platform !== 'win32',
     });
     this.child = child;
@@ -134,7 +169,7 @@ class DshProcess extends EventEmitter {
       this.emit('exit', { code, signal });
     });
 
-    this.emit('spawned', { cwd: DSH_REPO });
+    this.emit('spawned', { cmd, cwd });
   }
 
   _onStdout(chunk) {
@@ -446,7 +481,7 @@ if (!gotLock) {
       url: dsh.url,
       port: dsh.port,
       profile: DSH_PROFILE,
-      repo: DSH_REPO,
+      source: DSH_USE_REPO ? `repo:${DSH_REPO}` : 'bundled-npm',
     }));
 
     createTray();

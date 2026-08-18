@@ -4,8 +4,7 @@
 //
 // The packaged app checks GitHub Releases (owner/repo from electron-builder
 // `publish` config) for a newer version. When one is found it downloads the
-// new dmg/zip and applies it on quit — the standard "app auto-update" flow,
-// exactly like mkagent's electron-updater usage.
+// new dmg/zip and applies it on quit — the standard "app auto-update" flow.
 //
 // Auto-update can be disabled at build time. The release workflow writes a
 // build config `src/main/auto-update-config.json` (`{"enabled": false}`) for
