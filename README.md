@@ -28,6 +28,7 @@
 - ⚡️ **零配置启动**：首次启动自动下载 Node 运行时与 Harness 核心，之后全部本地运行，无需预装任何环境
 - 🔄 **运行时分发**：安装包不携带 dsh 依赖树；首次运行从 GitHub Releases 下载 `dsh-runtime-<platform>-<arch>.zip`，后续复用本地缓存
 - 🪶 **Node 运行时兜底**：优先使用系统 Node 22+；若系统没有合适版本，自动下载独立 Node 运行时到本地
+- 🔁 **内核自愈**：每次启动自动对比 GitHub Releases 最新 dsh 运行时，有新版本即自动升级；离线时保留本地继续运行
 - 🔒 **本地优先**：dsh 服务运行在 `127.0.0.1`，会话与设置保存在本机
 - 📌 **托盘驻留**：关闭窗口不退出，dsh 后台继续运行；托盘菜单可打开窗口、重启服务、退出
 - 🛡️ **进程守护**：安全回收 dsh 子进程（含强杀后残留的孤儿进程）
@@ -114,6 +115,7 @@ scripts/release.sh            一键发布脚本
 ## 技术要点
 
 - **运行时分发**：安装包不包含 dsh 依赖树；首次运行下载 `dsh-runtime-<platform>-<arch>.zip` 到 userData/dsh-runtime
+- **内核自愈**：每次启动对比 GitHub Releases 最新 dsh 运行时版本，有新版本自动下载替换；离线/限流时保留本地继续运行
 - **Node 运行时兜底**：优先使用系统 Node 22+；若没有，自动下载 `node-v22.23.1-<platform>-<arch>` 到 userData/node-runtime
 - **进程组管理**：dsh 以独立进程组运行，停止时整棵进程树（node → dsh）一并回收
 - **退出路径**：托盘"退出"/Cmd+Q 时先回收 dsh 子进程再退出；强杀 Electron 时通过 state 文件记录进程组 PID，下次启动自动清理孤儿进程

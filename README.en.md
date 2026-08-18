@@ -28,6 +28,7 @@
 - ⚡️ **Zero setup** — First launch bootstraps the Node runtime and Harness core automatically; everything after that runs locally, no environment setup required.
 - 🔄 **Runtime distribution** — The installer carries no dsh dependency tree; the first run downloads `dsh-runtime-<platform>-<arch>.zip` from GitHub Releases, then reuses the local cache.
 - 🪶 **Node fallback** — Prefers a system Node 22+; if none is available, it downloads a standalone Node runtime automatically.
+- 🔁 **Self-healing core** — Each launch checks GitHub Releases for the latest dsh runtime and upgrades automatically; offline, it keeps the local copy running.
 - 🔒 **Local by default** — The dsh service runs on `127.0.0.1`; sessions and settings stay on your machine.
 - 📌 **Tray resident** — Closing the window keeps dsh running in the background; the tray menu offers open / restart / quit.
 - 🛡️ **Process guard** — Safely reaps dsh child processes, including orphans left by force-killed Electron.
@@ -114,6 +115,7 @@ scripts/release.sh            one-shot release script
 ## Technical Highlights
 
 - **Runtime distribution**: the installer carries no dsh dependency tree; the first run downloads `dsh-runtime-<platform>-<arch>.zip` to userData/dsh-runtime
+- **Self-healing core**: each launch compares the GitHub Releases latest dsh runtime version and auto-upgrades; offline / rate-limited, it keeps the local copy running
 - **Node fallback**: prefers system Node 22+; otherwise downloads `node-v22.23.1-<platform>-<arch>` to userData/node-runtime
 - **Process group management**: dsh runs in its own process group; stopping reaps the whole tree (node → dsh)
 - **Exit paths**: tray "quit" / Cmd+Q reaps the dsh child before exiting; force-killed Electron is handled via a state file and cleaned on next launch
