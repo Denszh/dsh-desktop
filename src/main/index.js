@@ -562,11 +562,12 @@ function ensureRegularDockApp() {
 // app.focus({steal:true}) 偶尔被忽略，因此重试数次直至成功。
 function bringToFront() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
+  // 用户正在最小化窗口时，不要强制显示
+  if (mainWindow.isMinimized()) return;
   try {
     ensureRegularDockApp();
-    // 强制窗口进入所有 Space 并置顶，解决"窗口存在但离屏（在其他 Space/隐藏）"
-    // 导致用户看不到的问题。用户从 Dock 点开恢复窗口时特别需要。
-    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // 注意：不要用 setVisibleOnAllWorkspaces——它会阻止窗口最小化
+    // （最小化后立即恢复）。show/focus/moveTop 已足够带回当前 Space。
     mainWindow.show();
     mainWindow.focus();
     mainWindow.moveTop();
@@ -578,6 +579,7 @@ function bringToFront() {
   let attempts = 0;
   const retry = () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) return;
     try {
       mainWindow.show();
       mainWindow.focus();
