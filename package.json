@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "DeepSeek Harness 桌面壳 / Desktop shell for DeepSeek Harness — 零配置启动 dsh web，无需预装 Node / zero-setup, no Node required",
   "main": "src/main/index.js",
   "type": "commonjs",
