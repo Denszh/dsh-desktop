@@ -24,10 +24,19 @@ DeepSeek Harness 桌面壳 —— 用 Electron 包装 dsh web，提供托盘管�
 
 **发布命令**：
 ```bash
-# 需要 Apple Developer ID 证书 + GH_TOKEN 已配置
-pnpm dist:mac --publish always
+# 一键发布（更新版本 → 签名+公证打包 → 创建 GitHub Release）
+pnpm release 0.2.0 "发布说明"
 ```
-或手动：打包后把 `DshDesktop-<ver>.dmg`、`DshDesktop-<ver>.zip`、`latest-mac.yml` 上传到 GitHub Releases 并标记为最新。
+
+**一次性配置**：
+1. 复制 `.env.example` → `.env`，填入 Apple 凭据（`.env` 不入库）：
+   - `APPLE_ID`：Apple 开发者账号邮箱
+   - `APPLE_APP_SPECIFIC_PASSWORD`：App 专用密码（appleid.apple.com 生成）
+   - `APPLE_TEAM_ID`：团队 ID（证书中查看）
+2. 确认钥匙串有 Developer ID Application 证书
+3. `gh auth login` 已登录
+
+**手动发布**：打包后把 `DshDesktop-<ver>.dmg`、`DshDesktop-<ver>.zip`、`latest-mac.yml` 上传到 GitHub Releases 并标记为最新。
 
 ## 使用
 
@@ -35,6 +44,7 @@ pnpm dist:mac --publish always
 pnpm install      # 安装 electron + electron-builder
 pnpm start        # 启动（开发模式）
 pnpm dist:mac     # 打包 macOS dmg/zip
+pnpm release 0.2.0 "说明"  # 一键签名+公证+发布
 ```
 
 ## 配置（环境变量）
