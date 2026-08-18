@@ -7,8 +7,9 @@
 # 功能：
 #   1. 校验版本号 + 更新 package.json 版本
 #   2. 检查签名/公证凭据
-#   3. 打包（签名 + 公证）
-#   4. 发布 GitHub Release（dmg + zip + latest-mac.yml）
+#   3. 构建 dsh 运行时压缩包并发布 runtime release
+#   4. 打包（签名 + 公证）
+#   5. 发布 GitHub Release（dmg + zip + latest-mac.yml）
 #
 # 前置条件：
 #   - Apple Developer ID 证书已安装钥匙串（Developer ID Application）
@@ -74,11 +75,24 @@ fi
 echo "    签名证书: OK"
 echo "    公证凭据: OK"
 
-echo "==> [3/5] 打包（签名 + 公证）"
+echo "==> [3/5] 构建 dsh 运行时压缩包"
+bash scripts/build-dsh-runtime.sh
+RUNTIME_TAG="dsh-runtime-v${DSH_VERSION:-0.1.0-rc.6}"
+RUNTIME_ASSET="release/dsh-runtime-darwin-arm64.zip"
+if [ ! -f "$RUNTIME_ASSET" ]; then
+  echo "错误: 缺少运行时压缩包 $RUNTIME_ASSET" >&2
+  exit 1
+fi
+gh release delete "$RUNTIME_TAG" --yes 2>/dev/null || true
+gh release create "$RUNTIME_TAG" "$RUNTIME_ASSET" \
+  --title "dsh runtime v${DSH_VERSION:-0.1.0-rc.6}" \
+  --notes "DeepSeek Harness runtime payload for dsh-desktop"
+
+echo "==> [4/5] 打包（签名 + 公证）"
 export CSC_IDENTITY_AUTO_DISCOVERY=true
 pnpm dist:mac
 
-echo "==> [4/5] 创建 GitHub Release v$VERSION"
+echo "==> [5/5] 创建 GitHub Release v$VERSION"
 RELEASE_ASSETS=(
   "release/DshDesktop-${VERSION}-arm64.dmg"
   "release/DshDesktop-${VERSION}-arm64.zip"
@@ -99,6 +113,6 @@ else
     --title "DshDesktop v$VERSION"
 fi
 
-echo "==> [5/5] 完成"
+echo "==> 完成"
 echo "    发布地址: https://github.com/Denszh/dsh-desktop/releases/tag/v$VERSION"
 echo "    用户 app 将自动检测到 v$VERSION 并升级。"

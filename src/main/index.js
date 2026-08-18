@@ -68,8 +68,63 @@ function devDshBinPath() {
 const NODE_MIN_MAJOR = 22;
 
 function nodeBinInRuntime() {
-  // 独立 Node 运行时（下载到 userData/node-runtime，尚未实现下载，预留）
-  return null;
+  const binName = process.platform === 'win32' ? 'node.exe' : 'bin/node';
+  const p = path.join(app.getPath('userData'), 'node-runtime', binName);
+  return fs.existsSync(p) ? p : null;
+}
+
+function nodeRuntimeArchiveName() {
+  const version = `v${process.env.DSH_NODE_VERSION || '22.23.1'}`;
+  const osName = process.platform === 'darwin' ? 'darwin' : process.platform === 'win32' ? 'win' : 'linux';
+  const archName = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const ext = process.platform === 'win32' ? 'zip' : 'tar.gz';
+  return `node-${version}-${osName}-${archName}.${ext}`;
+}
+
+function nodeRuntimeDownloadUrl() {
+  const version = `v${process.env.DSH_NODE_VERSION || '22.23.1'}`;
+  return `https://nodejs.org/dist/${version}/${nodeRuntimeArchiveName()}`;
+}
+
+async function ensureNodeRuntime() {
+  if (nodeBinInRuntime()) return { installed: true, message: 'node runtime ready' };
+  const url = nodeRuntimeDownloadUrl();
+  const archive = nodeRuntimeArchiveName();
+  const userData = app.getPath('userData');
+  const archivePath = path.join(userData, archive);
+  const extractTmp = path.join(userData, '.node-extract-tmp');
+  const runtimeDir = path.join(userData, 'node-runtime');
+
+  console.log(`[dsh-desktop] downloading Node runtime: ${url}`);
+  await downloadFile(url, archivePath);
+  fs.rmSync(extractTmp, { recursive: true, force: true });
+  fs.mkdirSync(extractTmp, { recursive: true });
+  if (archive.endsWith('.zip')) {
+    await extractZip(archivePath, extractTmp);
+  } else {
+    await new Promise((resolve, reject) => {
+      execFile('tar', ['-xzf', archivePath, '-C', extractTmp], (err) => {
+        if (err) return reject(new Error(`解压 Node 失败: ${err.message}`));
+        resolve();
+      });
+    });
+  }
+  fs.rmSync(archivePath, { force: true });
+
+  fs.rmSync(runtimeDir, { recursive: true, force: true });
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  // node 压缩包顶层目录如 node-v22.23.1-darwin-arm64/
+  const entries = fs.readdirSync(extractTmp);
+  const root = entries.length === 1 ? path.join(extractTmp, entries[0]) : extractTmp;
+  for (const entry of fs.readdirSync(root)) {
+    fs.renameSync(path.join(root, entry), path.join(runtimeDir, entry));
+  }
+  fs.rmSync(extractTmp, { recursive: true, force: true });
+
+  const bin = nodeBinInRuntime();
+  if (!bin) throw new Error('Node runtime 下载后仍缺失可执行文件');
+  if (process.platform !== 'win32') fs.chmodSync(bin, 0o755);
+  return { installed: true, message: `node runtime installed: ${path.basename(bin)}` };
 }
 
 function systemNodeInfo() {
@@ -106,10 +161,16 @@ function systemNodeInfo() {
 async function resolveNode() {
   const bundled = nodeBinInRuntime();
   if (bundled) return { path: bundled, source: 'bundled' };
-  const sys = await systemNodeInfo();
-  if (sys && sys.major >= NODE_MIN_MAJOR) {
-    return { path: sys.path, source: `system v${sys.major}.${sys.minor}` };
+  if (process.env.DSH_DISABLE_SYSTEM_NODE !== '1') {
+    const sys = await systemNodeInfo();
+    if (sys && sys.major >= NODE_MIN_MAJOR) {
+      return { path: sys.path, source: `system v${sys.major}.${sys.minor}` };
+    }
   }
+  // 无合格系统 Node，自动下载独立 Node 运行时
+  await ensureNodeRuntime();
+  const downloaded = nodeBinInRuntime();
+  if (downloaded) return { path: downloaded, source: 'downloaded' };
   return { path: null, source: `system node missing or < v${NODE_MIN_MAJOR}` };
 }
 
@@ -191,7 +252,7 @@ function cleanupOrphanDsh() {
   let alive = true;
   try { process.kill(-groupPid, 0); } catch { alive = false; }
   if (alive) {
-    console.log(`[dsh-desktop] cleaning up orphaned dsh from a previous launch (pgid=${groupPid}, port=${port})`);
+  console.log(`[dsh-desktop] cleaning up orphaned dsh from a previous launch (pgid=${groupPid}, port=${port})`);
     killProcessGroup(groupPid, 'SIGTERM');
     setTimeout(() => killProcessGroup(groupPid, 'SIGKILL'), 4000).unref();
   }
@@ -418,11 +479,18 @@ let trayIcon = null;
 let isQuitting = false;
 const dsh = new DshProcess();
 
+function ensureRegularDockApp() {
+  if (process.platform !== 'darwin') return;
+  app.setActivationPolicy?.('regular');
+  app.dock?.show();
+}
+
 // 把窗口置前并激活应用。`open`/Launchpad 启动时应用可能尚未完全激活，
 // app.focus({steal:true}) 偶尔被忽略，因此重试数次直至成功。
 function bringToFront() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try {
+    ensureRegularDockApp();
     // 强制窗口进入所有 Space 并置顶，解决"窗口存在但离屏（在其他 Space/隐藏）"
     // 导致用户看不到的问题。用户从 Dock 点开恢复窗口时特别需要。
     mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -472,7 +540,6 @@ function createWindow(url) {
       nodeIntegration: false,
     },
   });
-  console.log('[dsh-desktop] BrowserWindow created, id:', mainWindow.id);
 
   mainWindow.on('show', bringToFront);
   mainWindow.on('closed', () => {
@@ -489,14 +556,12 @@ function createWindow(url) {
   // 不触发，导致窗口永远不弹）。页面加载中先显示，完成自动填充。
   if (url) {
     mainWindow.loadURL(url);
-    console.log('[dsh-desktop] loadURL called:', url);
   }
   mainWindow.show();
   bringToFront();
 
   // 兜底：即使上述 show 被系统延迟，did-finish-load 后再确保显示置前
   mainWindow.webContents.once('did-finish-load', () => {
-    console.log('[dsh-desktop] did-finish-load');
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.show();
       bringToFront();
@@ -651,7 +716,6 @@ function startDsh(nodeBin) {
   const bin = nodeBin || (app.isPackaged ? preparedNodeBin : undefined);
   dsh.start(bin);
   dsh.once('ready', ({ url }) => {
-    console.log('[dsh-desktop] dsh ready, opening window:', url);
     try {
       createWindow(url);
     } catch (err) {
@@ -770,6 +834,10 @@ if (gotLock) {
   app.on('second-instance', restoreMainWindow);
 
   app.whenReady().then(() => {
+    // Keep this as a regular foreground app. The tray is an additional control
+    // surface; it must not turn the app into a menu-bar-only process.
+    ensureRegularDockApp();
+
     // Register IPC handlers exactly once (ipcMain.handle rejects duplicates).
     ipcMain.handle('dsh:get-status', () => ({
       running: dsh.isRunning(),
