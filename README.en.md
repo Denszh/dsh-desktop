@@ -126,6 +126,10 @@ scripts/release.sh            one-shot release script
 - macOS Electron main swallows SIGTERM/SIGINT; orphan cleanup relies on the next launch
 - First run requires network to download the runtimes (Node + dsh, ~a few hundred MB)
 
+## Changelog
+
+All changes are recorded in [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 [MIT](LICENSE)

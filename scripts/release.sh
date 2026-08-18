@@ -60,7 +60,31 @@ const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 p.version = '$VERSION';
 fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
 "
-git add package.json
+# 维护 CHANGELOG：把 [Unreleased] 内容转入新版本 section，并重开 Unreleased
+node -e "
+const fs = require('fs');
+const path = 'CHANGELOG.md';
+let c = fs.readFileSync(path, 'utf8');
+const v = '$VERSION';
+const today = new Date().toISOString().slice(0, 10);
+// 提取 Unreleased 内容
+const uStart = c.indexOf('## [Unreleased]');
+const uEnd = c.indexOf('## [', uStart + '## [Unreleased]'.length);
+let unreleased = uStart >= 0 ? c.slice(c.indexOf('\n', uStart) + 1, uEnd < 0 ? c.length : uEnd).trim() : '';
+if (!unreleased) {
+  console.error('错误: CHANGELOG.md 的 [Unreleased] 为空，请先填写本次变更');
+  process.exit(1);
+}
+const section = '\n## [' + v + '] - ' + today + '\n\n' + unreleased + '\n';
+// 插入新版本 section 到第一个已发布版本之前（即 Unreleased 之后）
+const insertAt = uEnd < 0 ? c.length : uEnd;
+c = c.slice(0, uStart) + '## [Unreleased]\n\n### Added\n\n- （待填写）\n' + section + c.slice(insertAt);
+// 更新版本链接：新版本放最前，Unreleased 指向新版本
+c = c.replace(/\[Unreleased\]: .*/, '[Unreleased]: https://github.com/Denszh/dsh-desktop/compare/v' + v + '...HEAD\n[' + v + ']: https://github.com/Denszh/dsh-desktop/releases/tag/v' + v);
+fs.writeFileSync(path, c);
+console.log('CHANGELOG.md 已更新: 添加 v' + v);
+"
+git add package.json CHANGELOG.md
 git commit -m "chore: bump version to $VERSION"
 git push origin main
 

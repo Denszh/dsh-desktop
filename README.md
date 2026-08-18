@@ -126,6 +126,10 @@ scripts/release.sh            一键发布脚本
 - macOS Electron 主进程吞掉 SIGTERM/SIGINT，孤儿进程依赖下次启动清理
 - 首次运行需联网下载运行时（Node + dsh，约几百 MB）
 
+## 更新日志
+
+所有版本的变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## License
 
 [MIT](LICENSE)
