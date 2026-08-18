@@ -15,20 +15,44 @@ const {
 // ---------------------------------------------------------------------------
 
 // dsh 来源：
-//  - 默认：dsh-desktop 自带的 @deepseek-ai/dsh npm 依赖（可分发）
+//  - 默认（打包分发）：首次运行从 GitHub Releases 下载预打包的 dsh 运行时，
+//    解压到 userData/dsh-runtime，用 Electron 的 node 运行（可分发，壳不打包 dsh）
 //  - 可选：DSH_SOURCE=repo + DSH_REPO 指向本地源码（开发调试）
+//  - dev 模式：直接使用项目内 node_modules（本地开发）
 const DSH_USE_REPO = process.env.DSH_SOURCE === 'repo';
 const DSH_REPO = process.env.DSH_REPO || path.join(os.homedir(), 'personal', 'deepseek-harness');
 const DSH_PROFILE = process.env.DSH_PROFILE || 'web';
 const STATE_FILE = path.join(app.getPath('userData'), 'dsh-state.json');
 
-// 使用安装的 @deepseek-ai/dsh 包里的 dsh bin（随 dsh-desktop 一起打包分发）
-function dshBinPath() {
-  // Electron 打包后 node_modules 在 app.asar 内（或 unpacked）
+// dsh 运行时发行版下载源（GitHub Releases 资产）
+const DSH_RELEASE_OWNER = process.env.DSH_RELEASE_OWNER || 'Denszh';
+const DSH_RELEASE_REPO = process.env.DSH_RELEASE_REPO || 'dsh-desktop';
+const DSH_RUNTIME_VERSION = process.env.DSH_RUNTIME_VERSION || '0.1.0-rc.6';
+function dshRuntimeArchiveName() {
+  const os = process.platform === 'darwin' ? 'darwin' : process.platform === 'win32' ? 'windows' : 'linux';
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  return `dsh-runtime-${os}-${arch}.zip`;
+}
+function dshRuntimeDownloadUrl() {
+  return `https://github.com/${DSH_RELEASE_OWNER}/${DSH_RELEASE_REPO}/releases/download/dsh-runtime-v${DSH_RUNTIME_VERSION}/${dshRuntimeArchiveName()}`;
+}
+
+// dsh 运行时目录：userData/dsh-runtime（解压后 node_modules/@deepseek-ai/dsh/lib/bin.js）
+function dshRuntimeDir() {
+  return path.join(app.getPath('userData'), 'dsh-runtime');
+}
+function dshRuntimeBinPath() {
+  return path.join(dshRuntimeDir(), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js');
+}
+function dshRuntimeInstalled() {
+  return fs.existsSync(dshRuntimeBinPath());
+}
+
+// 本项目 dev 模式使用的 dsh bin
+function devDshBinPath() {
   const candidates = [
     path.join(__dirname, '..', '..', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
     path.join(app.getAppPath(), 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-    path.join(process.resourcesPath || '', 'app.asar', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
@@ -36,18 +60,64 @@ function dshBinPath() {
   return null;
 }
 
-function dshCommand() {
+// ---------------------------------------------------------------------------
+// Node 运行时解析：dsh 需要 Node >= 22（node:module stripTypeScriptTypes 等）。
+// 优先 userData 里的独立 node，其次系统 node；系统没有/版本低则提示。
+// ---------------------------------------------------------------------------
+
+const NODE_MIN_MAJOR = 22;
+
+function nodeBinInRuntime() {
+  // 独立 Node 运行时（下载到 userData/node-runtime，尚未实现下载，预留）
+  return null;
+}
+
+function systemNodeInfo() {
+  return new Promise((resolve) => {
+    const { execFile } = require('node:child_process');
+    execFile('node', ['--version'], { timeout: 3000 }, (err, stdout) => {
+      if (err) return resolve(null);
+      const m = /v?(\d+)\.(\d+)\.(\d+)/.exec(String(stdout).trim());
+      if (!m) return resolve(null);
+      const major = Number(m[1]);
+      const minor = Number(m[2]);
+      const patch = Number(m[3]);
+      resolve({ path: 'node', major, minor, patch });
+    });
+  });
+}
+
+async function resolveNode() {
+  const bundled = nodeBinInRuntime();
+  if (bundled) return { path: bundled, source: 'bundled' };
+  const sys = await systemNodeInfo();
+  if (sys && sys.major >= NODE_MIN_MAJOR) {
+    return { path: sys.path, source: `system v${sys.major}.${sys.minor}` };
+  }
+  return { path: null, source: `system node missing or < v${NODE_MIN_MAJOR}` };
+}
+
+function dshCommand(nodeBin) {
   if (DSH_USE_REPO) {
     // 本地源码调试：pnpm dsh
     const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
     return { cmd: pnpm, args: ['dsh', '--profile', DSH_PROFILE, '--port', '0'], cwd: DSH_REPO };
   }
-  // 分发包：直接 node 运行安装的 dsh bin。
-  // dev 模式用系统 node（process.execPath 是 Electron，不兼容 dsh）；
-  // 打包模式用 Electron 自带的 node（process.execPath）。
-  const bin = dshBinPath();
+  if (app.isPackaged) {
+    // 打包分发：用解析出的 node（>=22）运行下载的 dsh bin
+    if (!nodeBin) {
+      throw new Error('未找到 Node.js 运行时（需要 v22+），无法启动 dsh');
+    }
+    return {
+      cmd: nodeBin,
+      args: [dshRuntimeBinPath(), '--profile', DSH_PROFILE, '--port', '0'],
+      cwd: dshRuntimeDir(),
+    };
+  }
+  // dev 模式：用系统 node 跑项目内 dsh
+  const bin = devDshBinPath();
   if (bin) {
-    const runner = app.isPackaged ? process.execPath : (process.env.npm_node_execpath || 'node');
+    const runner = process.env.npm_node_execpath || 'node';
     return { cmd: runner, args: [bin, '--profile', DSH_PROFILE, '--port', '0'], cwd: app.getAppPath() };
   }
   // 回退：npx（需联网）
@@ -112,7 +182,84 @@ function cleanupOrphanDsh() {
 }
 
 // ---------------------------------------------------------------------------
-// Dsh process manager — spawns `pnpm dsh web --port 0` and discovers the port
+// Dsh runtime downloader — 方案 1：壳不打包 dsh，运行时从 GitHub Releases 下载
+// 预打包的 dsh 运行时 zip，解压到 userData/dsh-runtime 后用 Electron node 运行。
+// ---------------------------------------------------------------------------
+
+const https = require('node:https');
+const { execFile } = require('node:child_process');
+
+function downloadFile(url, dest) {
+  return new Promise((resolve, reject) => {
+    const request = (u) => {
+      https.get(u, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume(); // drain
+          return request(new URL(res.headers.location, u).href);
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return reject(new Error(`下载失败: HTTP ${res.statusCode} (${u})`));
+        }
+        const file = fs.createWriteStream(dest);
+        res.pipe(file);
+        file.on('finish', () => { file.close(); resolve(dest); });
+        file.on('error', (err) => { fs.rmSync(dest, { force: true }); reject(err); });
+        res.on('error', (err) => { file.close(); fs.rmSync(dest, { force: true }); reject(err); });
+      }).on('error', reject);
+    };
+    request(url);
+  });
+}
+
+function extractZip(zipPath, destDir) {
+  return new Promise((resolve, reject) => {
+    execFile('unzip', ['-o', '-q', zipPath, '-d', destDir], (err) => {
+      if (err) return reject(new Error(`解压失败: ${err.message}`));
+      resolve();
+    });
+  });
+}
+
+/**
+ * 确保 dsh 运行时已就绪：未安装则从 GitHub Releases 下载并解压。
+ * @returns {Promise<{installed: boolean, message: string}>}
+ */
+async function ensureDshRuntime() {
+  if (dshRuntimeInstalled()) {
+    return { installed: true, message: 'dsh runtime ready' };
+  }
+  const url = dshRuntimeDownloadUrl();
+  const archive = dshRuntimeArchiveName();
+  const runtimeDir = dshRuntimeDir();
+  const zipPath = path.join(app.getPath('userData'), archive);
+
+  console.log(`[dsh-desktop] downloading dsh runtime: ${url}`);
+  await downloadFile(url, zipPath);
+  // 解压到临时目录，再移动内层 dsh-runtime 内容到目标（zip 内带 dsh-runtime/ 顶层目录）
+  const extractTmp = path.join(app.getPath('userData'), '.dsh-extract-tmp');
+  fs.rmSync(extractTmp, { recursive: true, force: true });
+  fs.mkdirSync(extractTmp, { recursive: true });
+  await extractZip(zipPath, extractTmp);
+  fs.rmSync(zipPath, { force: true });
+
+  fs.rmSync(runtimeDir, { recursive: true, force: true });
+  fs.mkdirSync(runtimeDir, { recursive: true });
+  const nested = path.join(extractTmp, 'dsh-runtime');
+  const src = fs.existsSync(nested) ? nested : extractTmp;
+  for (const entry of fs.readdirSync(src)) {
+    fs.renameSync(path.join(src, entry), path.join(runtimeDir, entry));
+  }
+  fs.rmSync(extractTmp, { recursive: true, force: true });
+
+  if (!dshRuntimeInstalled()) {
+    throw new Error('dsh runtime 下载后仍缺失 bin.js');
+  }
+  return { installed: true, message: `dsh runtime v${DSH_RUNTIME_VERSION} installed` };
+}
+
+// ---------------------------------------------------------------------------
+// Dsh process manager — spawns dsh web and discovers the port
 // from the stdout line `dsh web: http://127.0.0.1:<port>`.
 // ---------------------------------------------------------------------------
 
@@ -126,17 +273,23 @@ class DshProcess extends EventEmitter {
     this._exited = false;
   }
 
-  start() {
+  start(nodeBin) {
     if (this.child) return;
 
-    const { cmd, args, cwd } = dshCommand();
+    const { cmd, args, cwd, env: extraEnv } = dshCommand(nodeBin);
     this._exited = false;
     this.url = null;
     this.port = null;
 
     const child = spawn(cmd, args, {
       cwd,
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        // 打包模式用 Electron 二进制跑 dsh（纯 Node 代码）时必须，否则
+        // Electron 会以 GUI 模式启动而非 node 模式。
+        ...(app.isPackaged && cmd === process.execPath ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+        ...(extraEnv || {}),
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
       // Own process group so stop() can terminate the whole tree
       // (node → dsh) instead of only the parent.
@@ -272,13 +425,18 @@ function createWindow(url) {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    // Focus the window AND bring the whole app to the foreground. When the
+    // app is launched via `open`/Launchpad it is not yet the active app, and a
+    // plain window.focus() is ignored; app.focus({ steal: true }) activates it.
     mainWindow.focus();
+    app.focus({ steal: true });
   });
 
   // Ensure the window comes to the foreground even if another app held focus
   // while dsh was still booting.
   mainWindow.on('show', () => {
     mainWindow.focus();
+    app.focus({ steal: true });
   });
 
   mainWindow.on('closed', () => {
@@ -391,11 +549,14 @@ function createTray() {
   });
 }
 
-// ---------------------------------------------------------------------------
 // dsh lifecycle wiring
 // ---------------------------------------------------------------------------
 
-function startDsh() {
+// 打包模式：dsh 运行时 + node 已就绪标记（避免重复下载/解析）
+let runtimePrepared = false;
+let preparedNodeBin = null;
+
+function startDsh(nodeBin) {
   if (dsh.isRunning()) return;
 
   // Reap any dsh left behind by a force-killed previous Electron instance.
@@ -406,8 +567,37 @@ function startDsh() {
   dsh.removeAllListeners('exit');
   dsh.removeAllListeners('error');
 
-  dsh.start();
+  // 打包分发：首次先准备 dsh 运行时（下载解压）+ 解析 node（>=22），
+  // 之后复用 runtimePrepared / preparedNodeBin，避免重复下载。
+  if (app.isPackaged && !DSH_USE_REPO && !runtimePrepared) {
+    dsh.removeAllListeners('download-progress');
+    dsh.emit('download-progress', '检查 dsh 运行时…');
+    (async () => {
+      await ensureDshRuntime();
+      const node = await resolveNode();
+      if (!node.path) {
+        throw new Error(`无法启动 dsh：${node.source}`);
+      }
+      return node;
+    })()
+      .then((node) => {
+        runtimePrepared = true;
+        preparedNodeBin = node.path;
+        dsh.removeAllListeners('download-progress');
+        startDsh(preparedNodeBin);
+      })
+      .catch((err) => {
+        console.error('[dsh-desktop] dsh runtime download failed:', err.message);
+        dsh.removeAllListeners('download-progress');
+        dsh.emit('error', err);
+      });
+    return;
+  }
+
+  const bin = nodeBin || (app.isPackaged ? preparedNodeBin : undefined);
+  dsh.start(bin);
   dsh.once('ready', ({ url }) => {
+    console.log('[dsh-desktop] dsh ready, opening window:', url);
     createWindow(url);
     updateTray();
   });

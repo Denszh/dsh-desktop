@@ -8,9 +8,12 @@ directories:
   output: release
   buildResources: resources
 
+# 壳最小化：不打包 node_modules（dsh 运行时由 app 首次启动时从 Releases 下载）。
+# dependencies 里的 @deepseek-ai/dsh 仅 dev 打包 dsh-runtime zip 用，不打进安装包。
 files:
   - src/**/*
   - package.json
+  - '!node_modules/**'
 
 extraResources:
   - from: resources/app-icon.png

@@ -1,5 +1,8 @@
 packages:
   - '.'
+# hoisted 模式：所有依赖平铺到 node_modules，兼容 electron-builder 打包
+# （默认 isolated 模式用 symlink，electron-builder 无法完整解析嵌套依赖）
+node-linker: hoisted
 allowBuilds:
   '@deepseek-ai/dsh-subprocess-local': true
   '@google/genai': true

@@ -11,20 +11,15 @@
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac",
-    "release": "bash scripts/release.sh"
+    "release": "bash scripts/release.sh",
+    "build:dsh-runtime": "bash scripts/build-dsh-runtime.sh"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh": "0.1.0-rc.6",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "electron",
-      "electron-winstaller"
-    ]
-  },
   "dependencies": {
-    "@deepseek-ai/dsh": "0.1.0-rc.6",
     "electron-updater": "^6.8.9"
   }
 }

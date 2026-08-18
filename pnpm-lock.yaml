@@ -8,13 +8,13 @@ importers:
 
   .:
     dependencies:
-      '@deepseek-ai/dsh':
-        specifier: 0.1.0-rc.6
-        version: 0.1.0-rc.6(4b02b31f4347d42e02dd8ae2631af2b2)
       electron-updater:
         specifier: ^6.8.9
         version: 6.8.9
     devDependencies:
+      '@deepseek-ai/dsh':
+        specifier: 0.1.0-rc.6
+        version: 0.1.0-rc.6(4b02b31f4347d42e02dd8ae2631af2b2)
       electron:
         specifier: ^33.0.0
         version: 33.4.11
