@@ -402,6 +402,25 @@ let trayIcon = null;
 let isQuitting = false;
 const dsh = new DshProcess();
 
+// 把窗口置前并激活应用。`open`/Launchpad 启动时应用可能尚未完全激活，
+// app.focus({steal:true}) 偶尔被忽略，因此重试数次直至成功。
+function bringToFront() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.show();
+  mainWindow.focus();
+  app.focus({ steal: true });
+  // 重试几次，覆盖应用激活延迟
+  let attempts = 0;
+  const retry = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.focus();
+    app.focus({ steal: true });
+    attempts += 1;
+    if (attempts < 5) setTimeout(retry, 500);
+  };
+  setTimeout(retry, 500);
+}
+
 function createWindow(url) {
   if (mainWindow) {
     mainWindow.loadURL(url);
@@ -426,11 +445,7 @@ function createWindow(url) {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    // Focus the window AND bring the whole app to the foreground. When the
-    // app is launched via `open`/Launchpad it is not yet the active app, and a
-    // plain window.focus() is ignored; app.focus({ steal: true }) activates it.
-    mainWindow.focus();
-    app.focus({ steal: true });
+    bringToFront();
   });
 
   // 兜底：页面加载可能很慢（首次加载 dsh 运行时 900 包），
@@ -438,20 +453,17 @@ function createWindow(url) {
   const showFallback = setTimeout(() => {
     if (mainWindow && !mainWindow.isVisible()) {
       mainWindow.show();
-      mainWindow.focus();
-      app.focus({ steal: true });
     }
+    bringToFront();
   }, 10000);
   mainWindow.on('closed', () => {
     clearTimeout(showFallback);
   });
 
   // Ensure the window comes to the foreground even if another app held focus
-  // while dsh was still booting.
-  mainWindow.on('show', () => {
-    mainWindow.focus();
-    app.focus({ steal: true });
-  });
+  // while dsh was still booting. Retry a few times: app.focus({steal}) can be
+  // ignored when the app is not yet fully activated after `open`/Launchpad.
+  mainWindow.on('show', bringToFront);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
