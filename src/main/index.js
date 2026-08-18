@@ -237,6 +237,13 @@ function createWindow(url) {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+    mainWindow.focus();
+  });
+
+  // Ensure the window comes to the foreground even if another app held focus
+  // while dsh was still booting.
+  mainWindow.on('show', () => {
+    mainWindow.focus();
   });
 
   mainWindow.on('closed', () => {
