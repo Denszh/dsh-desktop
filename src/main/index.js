@@ -756,7 +756,8 @@ function startDsh(nodeBin) {
     dsh.removeAllListeners('download-progress');
     dsh.emit('download-progress', '检查 dsh 运行时…');
     (async () => {
-      await ensureDshRuntime();
+      const rt = await ensureDshRuntime();
+      console.log(`[dsh-desktop] ${rt.message}`);
       const node = await resolveNode();
       if (!node.path) {
         throw new Error(`无法启动 dsh：${node.source}`);
