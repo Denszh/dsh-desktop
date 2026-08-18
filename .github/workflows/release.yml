@@ -202,7 +202,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           shopt -s nullglob
-          app_assets=(artifacts/*.dmg artifacts/*.zip artifacts/*.exe artifacts/latest*.yml)
+          app_assets=(artifacts/DshDesktop-*.dmg artifacts/DshDesktop-*.exe artifacts/latest*.yml)
           gh release create "$TAG" "${app_assets[@]}" \
             --title "DshDesktop $TAG" \
             --generate-notes

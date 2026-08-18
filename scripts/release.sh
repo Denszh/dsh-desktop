@@ -78,10 +78,13 @@ echo "    公证凭据: OK"
 echo "==> [3/5] 构建 dsh 运行时压缩包"
 bash scripts/build-dsh-runtime.sh
 PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+case "$PLATFORM" in
+  mingw*|msys*|cygwin*) PLATFORM="windows" ;;
+esac
 ARCH="$(uname -m)"
 case "$ARCH" in
-  x86_64) ARCH_NAME="x64" ;;
-  arm64)  ARCH_NAME="arm64" ;;
+  x86_64|amd64) ARCH_NAME="x64" ;;
+  arm64|aarch64)  ARCH_NAME="arm64" ;;
   *) echo "不支持的架构: $ARCH" >&2; exit 1 ;;
 esac
 RUNTIME_TAG="dsh-runtime-v${DSH_VERSION:-0.1.0-rc.6}"

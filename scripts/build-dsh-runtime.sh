@@ -16,11 +16,17 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 DSH_VERSION="${DSH_VERSION:-0.1.0-rc.6}"
-PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"   # darwin / linux
+# 平台名：uname -s 在 Windows(MSYS/MinGW/Git Bash) 返回 MINGW64_NT-* 等，需归一化
+PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+case "$PLATFORM" in
+  mingw*|msys*|cygwin*) PLATFORM="windows" ;;
+  darwin) PLATFORM="darwin" ;;
+  linux) PLATFORM="linux" ;;
+esac
 ARCH="$(uname -m)"                                    # arm64 / x86_64
 case "$ARCH" in
-  x86_64) ARCH_NAME="x64" ;;
-  arm64)  ARCH_NAME="arm64" ;;
+  x86_64|amd64) ARCH_NAME="x64" ;;
+  arm64|aarch64)  ARCH_NAME="arm64" ;;
   *) echo "不支持的架构: $ARCH" >&2; exit 1 ;;
 esac
 
