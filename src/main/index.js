@@ -131,7 +131,7 @@ function nodeRuntimeDownloadUrl() {
   return `https://nodejs.org/dist/${version}/${nodeRuntimeArchiveName()}`;
 }
 
-async function ensureNodeRuntime() {
+async function ensureNodeRuntime(onProgress) {
   if (nodeBinInRuntime()) return { installed: true, message: 'node runtime ready' };
   const url = nodeRuntimeDownloadUrl();
   const archive = nodeRuntimeArchiveName();
@@ -141,7 +141,7 @@ async function ensureNodeRuntime() {
   const runtimeDir = path.join(userData, 'node-runtime');
 
   console.log(`[dsh-desktop] downloading Node runtime: ${url}`);
-  await downloadFile(url, archivePath);
+  await downloadFile(url, archivePath, onProgress);
   fs.rmSync(extractTmp, { recursive: true, force: true });
   fs.mkdirSync(extractTmp, { recursive: true });
   if (archive.endsWith('.zip')) {
@@ -203,7 +203,7 @@ function systemNodeInfo() {
   });
 }
 
-async function resolveNode() {
+async function resolveNode(onProgress) {
   const bundled = nodeBinInRuntime();
   if (bundled) return { path: bundled, source: 'bundled' };
   if (process.env.DSH_DISABLE_SYSTEM_NODE !== '1') {
@@ -213,7 +213,7 @@ async function resolveNode() {
     }
   }
   // 无合格系统 Node，自动下载独立 Node 运行时
-  await ensureNodeRuntime();
+  await ensureNodeRuntime(onProgress);
   const downloaded = nodeBinInRuntime();
   if (downloaded) return { path: downloaded, source: 'downloaded' };
   return { path: null, source: `system node missing or < v${NODE_MIN_MAJOR}` };
@@ -311,7 +311,7 @@ function cleanupOrphanDsh() {
 const https = require('node:https');
 const { execFile } = require('node:child_process');
 
-function downloadFile(url, dest) {
+function downloadFile(url, dest, onProgress) {
   return new Promise((resolve, reject) => {
     const request = (u) => {
       https.get(u, (res) => {
@@ -324,6 +324,14 @@ function downloadFile(url, dest) {
           return reject(new Error(`下载失败: HTTP ${res.statusCode} (${u})`));
         }
         const file = fs.createWriteStream(dest);
+        const total = Number(res.headers['content-length']) || 0;
+        let received = 0;
+        res.on('data', (chunk) => {
+          received += chunk.length;
+          if (onProgress && total > 0) {
+            onProgress(Math.min(100, Math.round((received / total) * 100)));
+          }
+        });
         res.pipe(file);
         file.on('finish', () => { file.close(); resolve(dest); });
         file.on('error', (err) => { fs.rmSync(dest, { force: true }); reject(err); });
@@ -349,7 +357,7 @@ function extractZip(zipPath, destDir) {
  *  - 已安装但本地版本 < 最新版 → 自动升级（离线时保留本地）
  * @returns {Promise<{installed: boolean, message: string}>}
  */
-async function ensureDshRuntime() {
+async function ensureDshRuntime(onProgress) {
   const installed = dshRuntimeInstalled();
   const localVersion = readInstalledDshVersion();
 
@@ -374,7 +382,7 @@ async function ensureDshRuntime() {
   const zipPath = path.join(app.getPath('userData'), archive);
 
   console.log(`[dsh-desktop] downloading dsh runtime v${target}: ${url}`);
-  await downloadFile(url, zipPath);
+  await downloadFile(url, zipPath, onProgress);
   // 解压到临时目录，再移动内层 dsh-runtime 内容到目标（zip 内带 dsh-runtime/ 顶层目录）
   const extractTmp = path.join(app.getPath('userData'), '.dsh-extract-tmp');
   fs.rmSync(extractTmp, { recursive: true, force: true });
@@ -540,6 +548,8 @@ let mainWindow = null;
 let tray = null;
 let trayIcon = null;
 let isQuitting = false;
+// 当前窗口是否是首次下载/安装的 setup 进度窗口（true 时 createWindow 应切换为 dsh 页面）
+let isSetupWindow = false;
 const dsh = new DshProcess();
 
 function ensureRegularDockApp() {
@@ -580,12 +590,69 @@ function bringToFront() {
   setTimeout(retry, 500);
 }
 
+// 显示首次下载/安装的进度窗口（加载 renderer/index.html）。
+// 下载完成后由 createWindow(url) 切到 dsh 界面。
+function showSetupWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    bringToFront();
+    return;
+  }
+  isSetupWindow = true;
+  mainWindow = null;
+  mainWindow = new BrowserWindow({
+    width: 560,
+    height: 360,
+    minWidth: 480,
+    minHeight: 300,
+    show: false,
+    title: 'DeepSeek Harness',
+    icon: resourcePath('app-icon.png'),
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  mainWindow.on('show', bringToFront);
+  mainWindow.on('closed', () => { mainWindow = null; isSetupWindow = false; });
+  const setupHtml = path.join(__dirname, '..', 'renderer', 'index.html');
+  mainWindow.loadFile(setupHtml);
+  mainWindow.webContents.once('did-finish-load', () => {
+    // 页面就绪后补发当前进度（早期 IPC 事件可能因页面未加载而丢失）
+    if (lastSetupProgress) {
+      emitSetupProgress(lastSetupProgress.stage, lastSetupProgress.message, lastSetupProgress.percent);
+    }
+  });
+  mainWindow.show();
+  bringToFront();
+}
+
+// 向 setup 窗口推送下载进度（IPC 事件）
+// 最近一次 setup 进度（供窗口加载完成后补发）
+let lastSetupProgress = null;
+
+function emitSetupProgress(stage, message, percent) {
+  lastSetupProgress = { stage, message, percent };
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('setup:progress', { stage, message, percent });
+  }
+}
+
 function createWindow(url) {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    // 窗口已存在：只置前，不重新 loadURL（否则页面闪动/重载）
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    console.log('[dsh-desktop] window exists, bringToFront only (no reload)');
-    bringToFront();
+    if (isSetupWindow) {
+      // 首次下载的 setup 进度窗口已完成使命：切换到 dsh 页面
+      console.log('[dsh-desktop] setup done, loading dsh UI:', url);
+      isSetupWindow = false;
+      mainWindow.setSize(1280, 860);
+      mainWindow.loadURL(url);
+      bringToFront();
+    } else {
+      // 正常窗口已存在：只置前，不重新 loadURL（否则页面闪动/重载）
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      console.log('[dsh-desktop] window exists, bringToFront only (no reload)');
+      bringToFront();
+    }
     return;
   }
   mainWindow = null;
@@ -753,12 +820,23 @@ function startDsh(nodeBin) {
   // 打包分发：首次先准备 dsh 运行时（下载解压）+ 解析 node（>=22），
   // 之后复用 runtimePrepared / preparedNodeBin，避免重复下载。
   if (app.isPackaged && !DSH_USE_REPO && !runtimePrepared) {
+    // 仅在 dsh 未就绪时显示 setup 进度窗口；dsh 已装则后台准备，直接开主窗口
+    const needSetup = !dshRuntimeInstalled();
+
+    if (needSetup) {
+      // 需要下载：显示进度窗口
+      showSetupWindow();
+      emitSetupProgress('check', '检查 dsh 运行时…', 0);
+    }
+
+    const onDshProgress = (p) => emitSetupProgress('dsh', `正在下载 dsh 运行时 ${p}%`, p);
+    const onNodeProgress = (p) => emitSetupProgress('node', `正在下载 Node 运行时 ${p}%`, p);
+
     dsh.removeAllListeners('download-progress');
-    dsh.emit('download-progress', '检查 dsh 运行时…');
     (async () => {
-      const rt = await ensureDshRuntime();
+      const rt = await ensureDshRuntime(onDshProgress);
       console.log(`[dsh-desktop] ${rt.message}`);
-      const node = await resolveNode();
+      const node = await resolveNode(onNodeProgress);
       if (!node.path) {
         throw new Error(`无法启动 dsh：${node.source}`);
       }
@@ -767,12 +845,10 @@ function startDsh(nodeBin) {
       .then((node) => {
         runtimePrepared = true;
         preparedNodeBin = node.path;
-        dsh.removeAllListeners('download-progress');
         startDsh(preparedNodeBin);
       })
       .catch((err) => {
         console.error('[dsh-desktop] dsh runtime download failed:', err.message);
-        dsh.removeAllListeners('download-progress');
         dsh.emit('error', err);
       });
     return;
