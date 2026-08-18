@@ -75,15 +75,31 @@ function nodeBinInRuntime() {
 function systemNodeInfo() {
   return new Promise((resolve) => {
     const { execFile } = require('node:child_process');
-    execFile('node', ['--version'], { timeout: 3000 }, (err, stdout) => {
-      if (err) return resolve(null);
-      const m = /v?(\d+)\.(\d+)\.(\d+)/.exec(String(stdout).trim());
-      if (!m) return resolve(null);
-      const major = Number(m[1]);
-      const minor = Number(m[2]);
-      const patch = Number(m[3]);
-      resolve({ path: 'node', major, minor, patch });
-    });
+    const candidates = [
+      process.env.DSH_NODE,
+      path.join(os.homedir(), '.local', 'bin', 'node'),
+      '/opt/homebrew/bin/node',
+      '/usr/local/bin/node',
+      '/usr/bin/node',
+      'node',
+    ].filter(Boolean);
+
+    const check = (index) => {
+      if (index >= candidates.length) return resolve(null);
+      const nodePath = candidates[index];
+      execFile(nodePath, ['--version'], { timeout: 3000 }, (err, stdout) => {
+        if (err) return check(index + 1);
+        const m = /v?(\d+)\.(\d+)\.(\d+)/.exec(String(stdout).trim());
+        if (!m) return check(index + 1);
+        resolve({
+          path: nodePath,
+          major: Number(m[1]),
+          minor: Number(m[2]),
+          patch: Number(m[3]),
+        });
+      });
+    };
+    check(0);
   });
 }
 
@@ -117,7 +133,7 @@ function dshCommand(nodeBin) {
   // dev 模式：用系统 node 跑项目内 dsh
   const bin = devDshBinPath();
   if (bin) {
-    const runner = process.env.npm_node_execpath || 'node';
+    const runner = process.env.npm_node_execpath || path.join(os.homedir(), '.local', 'bin', 'node');
     return { cmd: runner, args: [bin, '--profile', DSH_PROFILE, '--port', '0'], cwd: app.getAppPath() };
   }
   // 回退：npx（需联网）
@@ -406,15 +422,27 @@ const dsh = new DshProcess();
 // app.focus({steal:true}) 偶尔被忽略，因此重试数次直至成功。
 function bringToFront() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.show();
-  mainWindow.focus();
-  app.focus({ steal: true });
+  try {
+    // 强制窗口进入所有 Space 并置顶，解决"窗口存在但离屏（在其他 Space/隐藏）"
+    // 导致用户看不到的问题。用户从 Dock 点开恢复窗口时特别需要。
+    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.moveTop();
+    app.focus({ steal: true });
+  } catch (err) {
+    console.error('[dsh-desktop] bringToFront error:', err.message);
+  }
   // 重试几次，覆盖应用激活延迟
   let attempts = 0;
   const retry = () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.focus();
-    app.focus({ steal: true });
+    try {
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.moveTop();
+      app.focus({ steal: true });
+    } catch { /* ignore */ }
     attempts += 1;
     if (attempts < 5) setTimeout(retry, 500);
   };
@@ -725,9 +753,21 @@ if (!gotLock) {
 }
 
 if (gotLock) {
-  app.on('second-instance', () => {
-    if (dsh.url) createWindow(dsh.url);
-  });
+  // 用户再次打开（Dock 点击 / 启动台 / 第二实例）时：恢复并置前主窗口。
+  // 关键：窗口可能已存在但离屏（在另一 Space / 最小化 / 隐藏），必须强制
+  // 带回当前 Space 并显示，否则用户看到"打开了但没页面"。
+  const restoreMainWindow = () => {
+    if (!dsh.url) return;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.loadURL(dsh.url);
+      bringToFront();
+    } else {
+      createWindow(dsh.url);
+    }
+  };
+
+  app.on('second-instance', restoreMainWindow);
 
   app.whenReady().then(() => {
     // Register IPC handlers exactly once (ipcMain.handle rejects duplicates).
@@ -752,6 +792,8 @@ if (gotLock) {
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0 && dsh.url) {
         createWindow(dsh.url);
+      } else {
+        restoreMainWindow();
       }
     });
   });
