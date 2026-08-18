@@ -9,10 +9,74 @@ permissions:
   contents: write
 
 jobs:
+  release-policy:
+    name: Resolve optional signing policy
+    runs-on: ubuntu-latest
+    outputs:
+      mac_signing: ${{ steps.signing.outputs.mac_signing }}
+      windows_signing: ${{ steps.signing.outputs.windows_signing }}
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.CSC_LINK }}
+      APPLE_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      WINDOWS_CERTIFICATE: ${{ secrets.WIN_CSC_LINK }}
+      WINDOWS_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+    steps:
+      - name: Validate optional signing credentials
+        id: signing
+        shell: bash
+        run: |
+          apple_names=(APPLE_CERTIFICATE APPLE_PASSWORD APPLE_ID APPLE_APP_PASSWORD APPLE_TEAM_ID)
+          windows_names=(WINDOWS_CERTIFICATE WINDOWS_PASSWORD)
+
+          apple_count=0
+          for name in "${apple_names[@]}"; do
+            if [ -n "${!name}" ]; then apple_count=$((apple_count + 1)); fi
+          done
+          windows_count=0
+          for name in "${windows_names[@]}"; do
+            if [ -n "${!name}" ]; then windows_count=$((windows_count + 1)); fi
+          done
+
+          if [ "$apple_count" -ne 0 ] && [ "$apple_count" -ne "${#apple_names[@]}" ]; then
+            echo "::error::Apple signing is partially configured. Set all Apple release secrets or remove all of them for an unsigned release."
+            exit 1
+          fi
+          if [ "$windows_count" -ne 0 ] && [ "$windows_count" -ne "${#windows_names[@]}" ]; then
+            echo "::error::Windows signing is partially configured. Set both Windows release secrets or remove both for an unsigned release."
+            exit 1
+          fi
+
+          if [ "$apple_count" -eq "${#apple_names[@]}" ]; then
+            echo "mac_signing=true" >> "$GITHUB_OUTPUT"
+            echo "Apple signing and notarization enabled"
+          else
+            echo "mac_signing=false" >> "$GITHUB_OUTPUT"
+            echo "Apple credentials absent; macOS artifacts will use ad-hoc signing and manual updates"
+          fi
+
+          if [ "$windows_count" -eq "${#windows_names[@]}" ]; then
+            echo "windows_signing=true" >> "$GITHUB_OUTPUT"
+            echo "Windows Authenticode signing enabled"
+          else
+            echo "windows_signing=false" >> "$GITHUB_OUTPUT"
+            echo "Windows credentials absent; Windows artifacts will be unsigned"
+          fi
+
   release-mac:
-    name: Build macOS
+    name: Build macOS (arm64 + x64)
+    needs: release-policy
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 90
+    env:
+      MAC_SIGNING: ${{ needs.release-policy.outputs.mac_signing }}
+      MAC_CSC_LINK: ${{ secrets.CSC_LINK }}
+      MAC_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      MAC_APPLE_ID: ${{ secrets.APPLE_ID }}
+      MAC_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      MAC_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -23,14 +87,32 @@ jobs:
           node-version: 20
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build macOS (sign + notarize)
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: pnpm exec electron-builder --mac --publish never
+      - name: Package macOS (both archs, sign + notarize)
+        shell: bash
+        run: |
+          args=(--mac --arm64 --x64 --publish never)
+          if [ "$MAC_SIGNING" = "true" ]; then
+            export CSC_LINK="$MAC_CSC_LINK"
+            export CSC_KEY_PASSWORD="$MAC_CSC_KEY_PASSWORD"
+            export APPLE_ID="$MAC_APPLE_ID"
+            export APPLE_APP_SPECIFIC_PASSWORD="$MAC_APPLE_APP_SPECIFIC_PASSWORD"
+            export APPLE_TEAM_ID="$MAC_APPLE_TEAM_ID"
+            args+=("-c.forceCodeSigning=true")
+            echo '{"enabled": true}' > src/main/auto-update-config.json
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            args+=("-c.mac.identity=-" "-c.mac.hardenedRuntime=false")
+            # Unsigned macOS builds cannot self-update; disable to avoid errors.
+            echo '{"enabled": false}' > src/main/auto-update-config.json
+          fi
+          pnpm exec electron-builder "${args[@]}"
+      - name: Verify macOS code signature
+        if: env.MAC_SIGNING == 'true'
+        run: |
+          for app in release/mac*/DshDesktop.app; do
+            codesign --verify --deep --strict --verbose=2 "$app"
+            xcrun stapler validate "$app"
+          done
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -43,8 +125,13 @@ jobs:
 
   release-win:
     name: Build Windows
+    needs: release-policy
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      WINDOWS_SIGNING: ${{ needs.release-policy.outputs.windows_signing }}
+      WINDOWS_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WINDOWS_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -55,8 +142,16 @@ jobs:
           node-version: 20
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Build Windows (NSIS)
-        run: pnpm exec electron-builder --win --publish never
+      - name: Package Windows (NSIS)
+        shell: bash
+        run: |
+          args=(--win --x64 --publish never)
+          if [ "$WINDOWS_SIGNING" = "true" ]; then
+            export CSC_LINK="$WINDOWS_CSC_LINK"
+            export CSC_KEY_PASSWORD="$WINDOWS_CSC_KEY_PASSWORD"
+            args+=("-c.forceCodeSigning=true")
+          fi
+          pnpm exec electron-builder "${args[@]}"
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:

@@ -6,6 +6,25 @@
 // `publish` config) for a newer version. When one is found it downloads the
 // new dmg/zip and applies it on quit — the standard "app auto-update" flow,
 // exactly like mkagent's electron-updater usage.
+//
+// Auto-update can be disabled at build time. The release workflow writes a
+// build config `src/main/auto-update-config.json` (`{"enabled": false}`) for
+// unsigned macOS builds, because electron-updater cannot update an unsigned
+// app. When the file is absent (local dev, signed builds) updates stay on.
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+function readAutoUpdateEnabled() {
+  try {
+    const cfgPath = path.join(__dirname, 'auto-update-config.json');
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      return cfg.enabled !== false;
+    }
+  } catch { /* default enabled */ }
+  return true;
+}
 
 /**
  * Set up electron-updater for the packaged app. No-op in dev (electron-updater
@@ -20,6 +39,10 @@ function setupAppUpdater({ app, autoUpdater, onStatus, onUpdateDownloaded }) {
   }
   if (!autoUpdater) {
     onStatus({ kind: 'no-updater', message: 'electron-updater not installed' });
+    return () => {};
+  }
+  if (!readAutoUpdateEnabled()) {
+    onStatus({ kind: 'no-updater', message: 'auto-update disabled for this build (unsigned)' });
     return () => {};
   }
 
