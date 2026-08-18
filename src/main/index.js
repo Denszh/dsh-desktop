@@ -422,11 +422,14 @@ function bringToFront() {
 }
 
 function createWindow(url) {
-  if (mainWindow) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.loadURL(url);
+    mainWindow.show();
     mainWindow.focus();
+    bringToFront();
     return;
   }
+  mainWindow = null;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -443,47 +446,37 @@ function createWindow(url) {
   });
   console.log('[dsh-desktop] BrowserWindow created, id:', mainWindow.id);
 
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
-    bringToFront();
-  });
-
-  // 兜底：页面加载可能很慢（首次加载 dsh 运行时 900 包），
-  // 10s 后强制显示，避免窗口永远不出现。
-  const showFallback = setTimeout(() => {
-    if (mainWindow && !mainWindow.isVisible()) {
-      mainWindow.show();
-    }
-    bringToFront();
-  }, 10000);
-  mainWindow.on('closed', () => {
-    clearTimeout(showFallback);
-  });
-
-  // Ensure the window comes to the foreground even if another app held focus
-  // while dsh was still booting. Retry a few times: app.focus({steal}) can be
-  // ignored when the app is not yet fully activated after `open`/Launchpad.
   mainWindow.on('show', bringToFront);
-
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 
+  // 外链在系统浏览器打开，不在应用内新窗口
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
 
+  // 关键：立即显示窗口，不依赖 ready-to-show（它可能因页面渲染时机而
+  // 不触发，导致窗口永远不弹）。页面加载中先显示，完成自动填充。
   if (url) {
     mainWindow.loadURL(url);
     console.log('[dsh-desktop] loadURL called:', url);
-    mainWindow.webContents.once('did-finish-load', () => {
-      console.log('[dsh-desktop] did-finish-load');
-    });
-    mainWindow.webContents.once('did-fail-load', (e, code, desc) => {
-      console.error('[dsh-desktop] did-fail-load:', code, desc);
-    });
   }
+  mainWindow.show();
+  bringToFront();
+
+  // 兜底：即使上述 show 被系统延迟，did-finish-load 后再确保显示置前
+  mainWindow.webContents.once('did-finish-load', () => {
+    console.log('[dsh-desktop] did-finish-load');
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      bringToFront();
+    }
+  });
+  mainWindow.webContents.once('did-fail-load', (e, code, desc) => {
+    console.error('[dsh-desktop] did-fail-load:', code, desc);
+  });
 }
 
 // ---------------------------------------------------------------------------
