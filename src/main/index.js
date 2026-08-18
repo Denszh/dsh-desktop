@@ -422,6 +422,7 @@ function createWindow(url) {
       nodeIntegration: false,
     },
   });
+  console.log('[dsh-desktop] BrowserWindow created, id:', mainWindow.id);
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -430,6 +431,19 @@ function createWindow(url) {
     // plain window.focus() is ignored; app.focus({ steal: true }) activates it.
     mainWindow.focus();
     app.focus({ steal: true });
+  });
+
+  // 兜底：页面加载可能很慢（首次加载 dsh 运行时 900 包），
+  // 10s 后强制显示，避免窗口永远不出现。
+  const showFallback = setTimeout(() => {
+    if (mainWindow && !mainWindow.isVisible()) {
+      mainWindow.show();
+      mainWindow.focus();
+      app.focus({ steal: true });
+    }
+  }, 10000);
+  mainWindow.on('closed', () => {
+    clearTimeout(showFallback);
   });
 
   // Ensure the window comes to the foreground even if another app held focus
@@ -450,6 +464,13 @@ function createWindow(url) {
 
   if (url) {
     mainWindow.loadURL(url);
+    console.log('[dsh-desktop] loadURL called:', url);
+    mainWindow.webContents.once('did-finish-load', () => {
+      console.log('[dsh-desktop] did-finish-load');
+    });
+    mainWindow.webContents.once('did-fail-load', (e, code, desc) => {
+      console.error('[dsh-desktop] did-fail-load:', code, desc);
+    });
   }
 }
 
@@ -598,7 +619,11 @@ function startDsh(nodeBin) {
   dsh.start(bin);
   dsh.once('ready', ({ url }) => {
     console.log('[dsh-desktop] dsh ready, opening window:', url);
-    createWindow(url);
+    try {
+      createWindow(url);
+    } catch (err) {
+      console.error('[dsh-desktop] createWindow failed:', err);
+    }
     updateTray();
   });
   dsh.on('exit', () => {
@@ -691,13 +716,10 @@ if (!gotLock) {
     });
   });
 
-  app.on('before-quit', (event) => {
-    if (!isQuitting) {
-      // A plain quit request (window close, Cmd+Q) without a prior explicit
-      // "退出" or SIGTERM keeps dsh alive in the tray.
-      event.preventDefault();
-      if (mainWindow) mainWindow.destroy();
-    }
+  // Dock 右键退出 / Cmd+Q：真正退出（macOS 标准行为）。
+  // 红点关闭窗口走 window-all-closed，保留托盘驻留。
+  app.on('before-quit', () => {
+    if (!isQuitting) isQuitting = true;
   });
 
   app.on('window-all-closed', () => {
