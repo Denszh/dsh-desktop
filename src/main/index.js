@@ -693,10 +693,45 @@ function startAppUpdater() {
 // App lifecycle
 // ---------------------------------------------------------------------------
 
-const gotLock = app.requestSingleInstanceLock();
+// 单实例锁：防止多实例。若拿不到锁，可能是上次异常退出残留的锁文件
+// （SingletonLock/SingletonSocket 无对应存活主进程）。清理残留后重试一次，
+// 避免"打开没反应"（新实例静默退出，却无主实例可聚焦）。
+let gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
-  app.quit();
-} else {
+  // 检查是否真的有存活主实例（Dock 上的应用在跑）
+  const hasLiveInstance = process.platform !== 'darwin'
+    ? false
+    : (() => {
+        try {
+          // macOS 上 Electron 用 SingletonSocket；若 socket 对应的进程已死，
+          // 锁是残留。这里直接清理 userData 的锁文件后重试。
+          const { execFileSync } = require('node:child_process');
+          execFileSync('pgrep', ['-f', 'DshDesktop.app/Contents/MacOS'], { stdio: 'ignore' });
+          return true; // 有主进程在跑
+        } catch {
+          return false; // 无主进程，锁是残留
+        }
+      })();
+
+  if (hasLiveInstance) {
+    // 真有主实例：让它聚焦窗口（发 second-instance 语义——新实例退出前通知）
+    app.quit();
+  } else {
+    // 无存活主实例：清理残留锁文件，重新获取锁
+    try {
+      const userData = app.getPath('userData');
+      for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+        try { fs.rmSync(path.join(userData, f), { force: true }); } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+    gotLock = app.requestSingleInstanceLock();
+    if (!gotLock) {
+      app.quit();
+    }
+  }
+}
+
+if (gotLock) {
   app.on('second-instance', () => {
     if (dsh.url) createWindow(dsh.url);
   });
