@@ -85,6 +85,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
+      - name: Cache dsh-runtime build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            .dsh-runtime-cache
+          key: ${{ runner.os }}-dsh-runtime-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Package macOS (both archs, sign + notarize)
@@ -143,6 +151,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
+      - name: Cache dsh-runtime build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            .dsh-runtime-cache
+          key: ${{ runner.os }}-dsh-runtime-${{ hashFiles('package.json', 'pnpm-lock.yaml') }}
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Package Windows (NSIS)

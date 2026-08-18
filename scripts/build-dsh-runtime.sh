@@ -30,25 +30,43 @@ case "$ARCH" in
   *) echo "不支持的架构: $ARCH" >&2; exit 1 ;;
 esac
 
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+# 固定缓存目录（可被 CI actions/cache 缓存，避免每次重装 2GB 依赖）
+CACHE_DIR="$ROOT/.dsh-runtime-cache/$PLATFORM-$ARCH_NAME"
+VERSION_FILE="$CACHE_DIR/.version"
 
-echo "==> [1/3] 在干净目录安装 dsh@$DSH_VERSION"
-cd "$WORK"
-mkdir dsh-runtime
-cd dsh-runtime
-# 用 hoisted 布局，保证依赖平铺（与 electron-builder 兼容无关，但运行时直接解压即用）
-npm init -y >/dev/null 2>&1
-npm install --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION" >/dev/null 2>&1
-npm install --no-audit --no-fund electron-updater >/dev/null 2>&1
+# 若缓存已存在且版本一致，直接复用（跳过 npm install，大幅提速）
+if [ -f "$VERSION_FILE" ] && [ "$(cat "$VERSION_FILE")" = "$DSH_VERSION" ] && [ -f "$CACHE_DIR/node_modules/@deepseek-ai/dsh/lib/bin.js" ]; then
+  echo "==> cache hit ($DSH_VERSION), skipping install"
+  WORK=""
+  DSH_TREE="$CACHE_DIR"
+else
+  WORK="$(mktemp -d)"
+  trap 'rm -rf "$WORK"' EXIT
+  echo "==> [1/3] 在干净目录安装 dsh@$DSH_VERSION"
+  cd "$WORK"
+  mkdir dsh-runtime
+  cd dsh-runtime
+  # 用 hoisted 布局，保证依赖平铺（与 electron-builder 兼容无关，但运行时直接解压即用）
+  npm init -y >/dev/null 2>&1
+  npm install --no-audit --no-fund "@deepseek-ai/dsh@$DSH_VERSION" >/dev/null 2>&1
+  npm install --no-audit --no-fund electron-updater >/dev/null 2>&1
 
-echo "==> [2/3] 校验 dsh 入口存在"
-if [ ! -f "node_modules/@deepseek-ai/dsh/lib/bin.js" ]; then
-  echo "错误: dsh bin.js 未找到" >&2
-  exit 1
+  echo "==> [2/3] 校验 dsh 入口存在"
+  if [ ! -f "node_modules/@deepseek-ai/dsh/lib/bin.js" ]; then
+    echo "错误: dsh bin.js 未找到" >&2
+    exit 1
+  fi
+
+  # 存入缓存目录
+  rm -rf "$CACHE_DIR"
+  mkdir -p "$CACHE_DIR"
+  cp -R "$WORK/dsh-runtime/." "$CACHE_DIR/"
+  echo "$DSH_VERSION" > "$VERSION_FILE"
+  DSH_TREE="$CACHE_DIR"
 fi
 
 echo "==> [3/3] 打包 dsh-runtime-$PLATFORM-$ARCH_NAME.zip"
+cd "$DSH_TREE"
 mkdir -p "$ROOT/release"
 # 精简：去掉不需要的 dev 文件、测试、map
 rm -rf node_modules/.cache 2>/dev/null || true
@@ -57,15 +75,14 @@ find node_modules -type d -name "__tests__" -prune -exec rm -rf {} + 2>/dev/null
 find node_modules -type d -name "test" -prune -exec rm -rf {} + 2>/dev/null || true
 find node_modules -type d -name "tests" -prune -exec rm -rf {} + 2>/dev/null || true
 
-cd "$WORK"
 OUT="$ROOT/release/dsh-runtime-$PLATFORM-$ARCH_NAME.zip"
-mkdir -p "$ROOT/release"
+cd "$ROOT"
 if command -v zip >/dev/null 2>&1; then
-  zip -qr "$OUT" dsh-runtime
+  (cd "$DSH_TREE" && zip -qr "$OUT" .)
 else
   # Windows runner 无 zip 命令时的兜底
-  powershell.exe -NoProfile -Command "Compress-Archive -Path '$(cygpath -w "$WORK/dsh-runtime/*")' -DestinationPath '$(cygpath -w "$OUT")' -Force" 2>/dev/null \
-    || tar -czf "$OUT" dsh-runtime
+  powershell.exe -NoProfile -Command "Compress-Archive -Path '$(cygpath -w "$DSH_TREE/*")' -DestinationPath '$(cygpath -w "$OUT")' -Force" 2>/dev/null \
+    || (cd "$DSH_TREE" && tar -czf "$OUT" .)
 fi
 echo "完成: $OUT"
 ls -lh "$OUT" | awk '{print $5, $9}'
