@@ -33,8 +33,53 @@ function dshRuntimeArchiveName() {
   const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
   return `dsh-runtime-${os}-${arch}.zip`;
 }
-function dshRuntimeDownloadUrl() {
-  return `https://github.com/${DSH_RELEASE_OWNER}/${DSH_RELEASE_REPO}/releases/download/dsh-runtime-v${DSH_RUNTIME_VERSION}/${dshRuntimeArchiveName()}`;
+function dshRuntimeDownloadUrl(version = DSH_RUNTIME_VERSION) {
+  return `https://github.com/${DSH_RELEASE_OWNER}/${DSH_RELEASE_REPO}/releases/download/dsh-runtime-v${version}/${dshRuntimeArchiveName()}`;
+}
+
+// 本地已安装的 dsh 运行时版本（记录在 dsh-runtime/.version，供内核自愈对比）
+function readInstalledDshVersion() {
+  try {
+    const p = path.join(dshRuntimeDir(), '.version');
+    if (fs.existsSync(p)) return fs.readFileSync(p, 'utf8').trim();
+  } catch { /* ignore */ }
+  return null;
+}
+function writeInstalledDshVersion(version) {
+  try {
+    fs.writeFileSync(path.join(dshRuntimeDir(), '.version'), version);
+  } catch (err) {
+    console.warn('[dsh-desktop] failed to write runtime version:', err.message);
+  }
+}
+
+/**
+ * 查询 GitHub Releases 中最新 dsh-runtime tag 的版本号（如 "0.1.0-rc.6"）。
+ * 失败/离线返回 null（调用方保留本地版本继续跑）。
+ */
+function latestDshRuntimeVersion() {
+  return new Promise((resolve) => {
+    https.get(`https://api.github.com/repos/${DSH_RELEASE_OWNER}/${DSH_RELEASE_REPO}/releases?per_page=100`, {
+      headers: { 'User-Agent': 'dsh-desktop', Accept: 'application/vnd.github+json' },
+      timeout: 8000,
+    }, (res) => {
+      let data = '';
+      res.on('data', (c) => { data += c; });
+      res.on('end', () => {
+        try {
+          const releases = JSON.parse(data);
+          const tags = (Array.isArray(releases) ? releases : [])
+            .map((r) => r.tag_name || '')
+            .filter((t) => /^dsh-runtime-v.+/.test(t))
+            .map((t) => t.replace(/^dsh-runtime-v/, ''))
+            .sort();
+          resolve(tags.length > 0 ? tags[tags.length - 1] : null);
+        } catch {
+          resolve(null);
+        }
+      });
+    }).on('error', () => resolve(null));
+  });
 }
 
 // dsh 运行时目录：userData/dsh-runtime（解压后 node_modules/@deepseek-ai/dsh/lib/bin.js）
@@ -299,19 +344,36 @@ function extractZip(zipPath, destDir) {
 }
 
 /**
- * 确保 dsh 运行时已就绪：未安装则从 GitHub Releases 下载并解压。
+ * 确保 dsh 运行时已就绪并保持最新（内核自愈）：
+ *  - 未安装 → 下载最新版
+ *  - 已安装但本地版本 < 最新版 → 自动升级（离线时保留本地）
  * @returns {Promise<{installed: boolean, message: string}>}
  */
 async function ensureDshRuntime() {
-  if (dshRuntimeInstalled()) {
-    return { installed: true, message: 'dsh runtime ready' };
+  const installed = dshRuntimeInstalled();
+  const localVersion = readInstalledDshVersion();
+
+  // 查询最新版本（失败=离线/限流，保留本地）
+  const latest = await latestDshRuntimeVersion();
+  if (installed && !latest) {
+    // 离线或 API 不可达：保留本地。若本地没有版本记录，补写当前基线版本。
+    if (!localVersion) writeInstalledDshVersion(DSH_RUNTIME_VERSION);
+    return { installed: true, message: `dsh runtime v${localVersion || DSH_RUNTIME_VERSION} (offline, keep local)` };
   }
-  const url = dshRuntimeDownloadUrl();
+  const target = latest || DSH_RUNTIME_VERSION;
+
+  // 已安装且版本匹配（或本地无记录视为基线）→ 直接用
+  if (installed && (!localVersion || localVersion === target)) {
+    if (!localVersion) writeInstalledDshVersion(target);
+    return { installed: true, message: `dsh runtime v${target} ready` };
+  }
+
+  const url = dshRuntimeDownloadUrl(target);
   const archive = dshRuntimeArchiveName();
   const runtimeDir = dshRuntimeDir();
   const zipPath = path.join(app.getPath('userData'), archive);
 
-  console.log(`[dsh-desktop] downloading dsh runtime: ${url}`);
+  console.log(`[dsh-desktop] downloading dsh runtime v${target}: ${url}`);
   await downloadFile(url, zipPath);
   // 解压到临时目录，再移动内层 dsh-runtime 内容到目标（zip 内带 dsh-runtime/ 顶层目录）
   const extractTmp = path.join(app.getPath('userData'), '.dsh-extract-tmp');
@@ -332,7 +394,8 @@ async function ensureDshRuntime() {
   if (!dshRuntimeInstalled()) {
     throw new Error('dsh runtime 下载后仍缺失 bin.js');
   }
-  return { installed: true, message: `dsh runtime v${DSH_RUNTIME_VERSION} installed` };
+  writeInstalledDshVersion(target);
+  return { installed: true, message: `dsh runtime v${target} installed` };
 }
 
 // ---------------------------------------------------------------------------
@@ -519,9 +582,9 @@ function bringToFront() {
 
 function createWindow(url) {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.loadURL(url);
-    mainWindow.show();
-    mainWindow.focus();
+    // 窗口已存在：只置前，不重新 loadURL（否则页面闪动/重载）
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    console.log('[dsh-desktop] window exists, bringToFront only (no reload)');
     bringToFront();
     return;
   }
@@ -555,6 +618,7 @@ function createWindow(url) {
   // 关键：立即显示窗口，不依赖 ready-to-show（它可能因页面渲染时机而
   // 不触发，导致窗口永远不弹）。页面加载中先显示，完成自动填充。
   if (url) {
+    console.log('[dsh-desktop] creating new window, loadURL:', url);
     mainWindow.loadURL(url);
   }
   mainWindow.show();
@@ -823,8 +887,8 @@ if (gotLock) {
   const restoreMainWindow = () => {
     if (!dsh.url) return;
     if (mainWindow && !mainWindow.isDestroyed()) {
+      // 窗口已存在：只置前，不重新 loadURL（否则页面闪动/重载）
       if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.loadURL(dsh.url);
       bringToFront();
     } else {
       createWindow(dsh.url);
