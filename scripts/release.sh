@@ -77,8 +77,15 @@ echo "    公证凭据: OK"
 
 echo "==> [3/5] 构建 dsh 运行时压缩包"
 bash scripts/build-dsh-runtime.sh
+PLATFORM="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64) ARCH_NAME="x64" ;;
+  arm64)  ARCH_NAME="arm64" ;;
+  *) echo "不支持的架构: $ARCH" >&2; exit 1 ;;
+esac
 RUNTIME_TAG="dsh-runtime-v${DSH_VERSION:-0.1.0-rc.6}"
-RUNTIME_ASSET="release/dsh-runtime-darwin-arm64.zip"
+RUNTIME_ASSET="release/dsh-runtime-$PLATFORM-$ARCH_NAME.zip"
 if [ ! -f "$RUNTIME_ASSET" ]; then
   echo "错误: 缺少运行时压缩包 $RUNTIME_ASSET" >&2
   exit 1

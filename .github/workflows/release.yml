@@ -113,6 +113,8 @@ jobs:
             codesign --verify --deep --strict --verbose=2 "$app"
             xcrun stapler validate "$app"
           done
+      - name: Build dsh runtime (darwin arm64)
+        run: bash scripts/build-dsh-runtime.sh
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -121,6 +123,7 @@ jobs:
             release/*.dmg
             release/*.zip
             release/latest-mac.yml
+            release/dsh-runtime-*.zip
           if-no-files-found: error
 
   release-win:
@@ -152,6 +155,9 @@ jobs:
             args+=("-c.forceCodeSigning=true")
           fi
           pnpm exec electron-builder "${args[@]}"
+      - name: Build dsh runtime (win x64)
+        shell: bash
+        run: bash scripts/build-dsh-runtime.sh
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -159,6 +165,7 @@ jobs:
           path: |
             release/*.exe
             release/latest.yml
+            release/dsh-runtime-*.zip
           if-no-files-found: error
 
   publish:
@@ -173,11 +180,29 @@ jobs:
           pattern: release-*
           path: artifacts
           merge-multiple: true
+      - name: Publish dsh runtime assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUNTIME_TAG: dsh-runtime-v0.1.0-rc.6
+        shell: bash
+        run: |
+          shopt -s nullglob
+          runtime_zips=(artifacts/dsh-runtime-*.zip)
+          if [ ${#runtime_zips[@]} -eq 0 ]; then
+            echo "::warning::no dsh-runtime zip found, skipping runtime release"
+            exit 0
+          fi
+          gh release delete "$RUNTIME_TAG" --yes >/dev/null 2>&1 || true
+          gh release create "$RUNTIME_TAG" "${runtime_zips[@]}" \
+            --title "dsh runtime payloads" \
+            --notes "Prebuilt DeepSeek Harness runtimes for dsh-desktop (per platform/arch)"
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$TAG" artifacts/* \
+          shopt -s nullglob
+          app_assets=(artifacts/*.dmg artifacts/*.zip artifacts/*.exe artifacts/latest*.yml)
+          gh release create "$TAG" "${app_assets[@]}" \
             --title "DshDesktop $TAG" \
             --generate-notes

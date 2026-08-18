@@ -52,6 +52,14 @@ find node_modules -type d -name "test" -prune -exec rm -rf {} + 2>/dev/null || t
 find node_modules -type d -name "tests" -prune -exec rm -rf {} + 2>/dev/null || true
 
 cd "$WORK"
-zip -qr "$ROOT/release/dsh-runtime-$PLATFORM-$ARCH_NAME.zip" dsh-runtime
-echo "完成: release/dsh-runtime-$PLATFORM-$ARCH_NAME.zip"
-ls -lh "$ROOT/release/dsh-runtime-$PLATFORM-$ARCH_NAME.zip" | awk '{print $5, $9}'
+OUT="$ROOT/release/dsh-runtime-$PLATFORM-$ARCH_NAME.zip"
+mkdir -p "$ROOT/release"
+if command -v zip >/dev/null 2>&1; then
+  zip -qr "$OUT" dsh-runtime
+else
+  # Windows runner 无 zip 命令时的兜底
+  powershell.exe -NoProfile -Command "Compress-Archive -Path '$(cygpath -w "$WORK/dsh-runtime/*")' -DestinationPath '$(cygpath -w "$OUT")' -Force" 2>/dev/null \
+    || tar -czf "$OUT" dsh-runtime
+fi
+echo "完成: $OUT"
+ls -lh "$OUT" | awk '{print $5, $9}'
