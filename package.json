@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop",
   "version": "0.1.5",
-  "description": "DeepSeek Harness Desktop — Electron shell that spawns and manages dsh web",
+  "description": "DeepSeek Harness 桌面壳 / Desktop shell for DeepSeek Harness — 零配置启动 dsh web，无需预装 Node / zero-setup, no Node required",
   "main": "src/main/index.js",
   "type": "commonjs",
   "license": "MIT",
