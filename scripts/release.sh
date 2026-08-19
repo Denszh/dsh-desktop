@@ -140,11 +140,14 @@ for f in "${RELEASE_ASSETS[@]}"; do
 done
 
 if [ -n "$NOTES" ]; then
+  cat scripts/release-notes-template.md > /tmp/release-notes.md
+  echo "" >> /tmp/release-notes.md
+  echo "$NOTES" >> /tmp/release-notes.md
   gh release create "v$VERSION" "${RELEASE_ASSETS[@]}" \
-    --title "DshDesktop v$VERSION" --notes "$NOTES"
+    --title "DshDesktop v$VERSION" --notes-file /tmp/release-notes.md
 else
   gh release create "v$VERSION" "${RELEASE_ASSETS[@]}" \
-    --title "DshDesktop v$VERSION"
+    --title "DshDesktop v$VERSION" --notes-file scripts/release-notes-template.md
 fi
 
 echo "==> 完成"

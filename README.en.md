@@ -42,6 +42,8 @@ The first run downloads the Node runtime and Harness core (~a few hundred MB) an
 
 **Requirements:** macOS 10.15+ / Windows 10+ (64-bit) · network on first launch
 
+> 🤔 **Not sure which to download?** Every version's [release notes](https://github.com/Denszh/dsh-desktop/releases) includes a simple "which installer should I download" guide — follow it and you're good.
+
 ### Which installer should I download?
 
 Not sure which file to pick? Use this simple guide:

@@ -219,6 +219,9 @@ jobs:
         run: |
           shopt -s nullglob
           app_assets=(artifacts/DshDesktop-*.dmg artifacts/DshDesktop-*.zip artifacts/DshDesktop-*.exe artifacts/latest*.yml)
+          # 组装 release notes：下载指南模板 + 自动生成的 changelog
+          gh release generate-notes "$TAG" > "$RUNNER_TEMP/changelog.md" 2>/dev/null || true
+          cat scripts/release-notes-template.md "$RUNNER_TEMP/changelog.md" > "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" "${app_assets[@]}" \
             --title "DshDesktop $TAG" \
-            --generate-notes
+            --notes-file "$RUNNER_TEMP/notes.md"
