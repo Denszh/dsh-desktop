@@ -42,6 +42,24 @@ The first run downloads the Node runtime and Harness core (~a few hundred MB) an
 
 **Requirements:** macOS 10.15+ / Windows 10+ (64-bit) · network on first launch
 
+### Which installer should I download?
+
+Not sure which file to pick? Use this simple guide:
+
+| Your computer | Download this file |
+|---------------|-------------------|
+| **Mac (MacBook / iMac / Mac Studio)** | the one with **`arm64`** in the name (`.dmg`) |
+| **Older Intel Mac** | the one with **`x64`** in the name (`.dmg`) |
+| **Windows PC** | the one with **`x64`** in the name (`.exe`) |
+
+> 💡 **Tip**: On the [Releases](https://github.com/Denszh/dsh-desktop/releases) page, just look for `arm64` or `x64` in the file name.
+> - Newer Mac with Apple silicon → `arm64`
+> - Intel Mac or Windows → `x64`
+>
+> Not sure what chip you have? Open "About This Mac" (Mac) or "System Information" (Windows) and check if it says Apple or Intel.
+
+> 📦 The `.zip` files are for automatic updates — **regular users don't need to download them**.
+
 ## How It Works
 
 ```text
